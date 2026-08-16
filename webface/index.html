@@ -1,0 +1,18 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bobot webface</title>
+    <!--<link rel="stylesheet" href="style.css">-->
+    <script type="module">
+      import { Board } from './board.js';
+      var b = new Board("board", 13);
+      b.set_stones(['xxxx....oooo', '...x..oo...', '.x.o.x.o']);
+      b.on_click = (row, col) => console.log("Click", row, col);
+    </script>
+  </head>
+  <body style="display: flex; height: 100vh; margin: 0">
+    <svg id="board" style="flex: 1; min-height: 0; min-width: 0"></svg>
+  </body>
+</html>
