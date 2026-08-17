@@ -25,7 +25,7 @@ impl Board {
     /// Plays a single stone.
     /// Returns next board state if the move was valid, Err if was invalid.
     /// Panics when playing outside 16x16.
-    pub fn play_stone(&mut self, row: usize, col: usize, color: Color) -> Result<Board, MoveError> {
+    pub fn play_stone(&self, row: usize, col: usize, color: Color) -> Result<Board, MoveError> {
         let empty = self.empty();
         let current_move = Bitboard16::single(row, col);
 
@@ -86,5 +86,17 @@ impl Board {
         }
 
         score
+    }
+
+    pub fn legal_moves(&self, color: Color) -> Bitboard16 {
+        let empty = self.empty();
+        let mut legal = empty;
+        for (r, c) in empty.iter_positions() {
+            if self.play_stone(r, c, color).is_err() {
+                legal.set(r, c, false);
+            }
+        }
+
+        legal
     }
 }
