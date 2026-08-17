@@ -4,7 +4,9 @@ export class Board {
   #board;
   #size;
   #stones_group;
-  #highlight;
+  #move_preview;
+  #move_preview_mask;
+  #move_preview_last_pos;
   
   constructor(element_id, size) {
     this.#size = Number(size);
@@ -15,24 +17,24 @@ export class Board {
 
     this.#board.setAttribute("viewBox", "-1 -1 " + (this.#size + 1) + " " + (this.#size + 1))
 
-    const [children, stones_group, highlight] = this.#make_board();
+    const [children, stones_group, move_preview] = this.#make_board();
     this.#board.replaceChildren(...children);
     this.#stones_group = stones_group;
-    this.#highlight = highlight;
+    this.#move_preview = move_preview;
+    this.#move_preview_last_pos = [0, 0];
 
     this.on_click = null;
 
     this.#board.addEventListener('pointermove', (event) => {
       const pos = this.#board_coordinates(event);
-      if (pos === null)
-        this.#hide_highlight();
+      if (pos === null || this.#check_move_preview_mask(pos))
+        this.#hide_move_preview();
       else {
-        const [row, col] = pos;
-        this.#move_highlight(row, col);
+        this.#place_move_preview(pos);
       }
     });
-    this.#board.addEventListener('pointerleave', () => this.#hide_highlight());
-    this.#board.addEventListener('pointercancel', () => this.#hide_highlight());
+    this.#board.addEventListener('pointerleave', () => this.#hide_move_preview());
+    this.#board.addEventListener('pointercancel', () => this.#hide_move_preview());
     this.#board.addEventListener('click', (event) => {
       const pos = this.#board_coordinates(event);
       if (pos !== null && this.on_click) {
@@ -62,14 +64,50 @@ export class Board {
     this.#stones_group.replaceChildren(...elements);
   }
 
-  #move_highlight(row, col) {
-    this.#highlight.setAttribute('visibility', 'visible');
-    this.#highlight.setAttribute('cx', col);
-    this.#highlight.setAttribute('cy', row);
+  /// Move preview can be either null (disabled), 'black', 'white'.
+  /// Mask can be either `null` (allowed everywhere) or a list of strings,
+  /// one line per row, with character 'x' representing not allowed, any other representing
+  /// an allowed position.
+  set_move_preview(color, mask = null) {
+    if (color !== null && color !== 'black' && color !== 'white')
+      throw new Error('move_preview_color must be "black", "white" or null, got ${color}');
+
+    if (mask !== null)
+      this.#move_preview_mask = [...mask];
+    else
+      this.#move_preview_mask = null;
+
+    if (color === null) {
+      this.#hide_move_preview();
+      return;
+    }
+
+    if (this.#check_move_preview_mask(this.#move_preview_last_pos)) {
+      this.#hide_move_preview();
+    }
+
+    this.#move_preview.setAttribute('fill', color);
+    this.#move_preview.classList.remove('stone-black');
+    this.#move_preview.classList.remove('stone-white');
+    this.#move_preview.classList.add('stone-' + color);
   }
 
-  #hide_highlight() {
-    this.#highlight.setAttribute('visibility', 'hidden');
+  #place_move_preview(pos) {
+    const [row, col] = pos;
+    this.#move_preview.setAttribute('visibility', 'visible');
+    this.#move_preview.setAttribute('cx', col);
+    this.#move_preview.setAttribute('cy', row);
+    this.#move_preview_last_pos = pos;
+  }
+
+  #hide_move_preview() {
+    this.#move_preview.setAttribute('visibility', 'hidden');
+  }
+
+  /// Returns true if the move preview should be hidden at the given position.
+  #check_move_preview_mask(pos) {
+    const [row, col] = pos;
+    return !(this.#move_preview_mask?.[row]?.[col] !== 'x');
   }
 
   #make_board() {
@@ -115,19 +153,17 @@ export class Board {
       }
     }
 
-    const highlight = document.createElementNS(svg_ns, 'circle');
-    highlight.classList.add('highlight');
-    highlight.setAttribute('visibility', 'hidden');
-    highlight.setAttribute('r', 0.5);
-    highlight.setAttribute('fill', '#ccc');
-    highlight.setAttribute('fill-opacity', '0.5');
-    elements.push(highlight);
+    const move_preview = this.#make_stone(0, 0, 'black'); // The defaults are not important
+    move_preview.classList.add('move_preview');
+    move_preview.setAttribute('visibility', 'hidden');
+    move_preview.setAttribute('opacity', '0.5');
+    elements.push(move_preview);
 
     const stones_group = document.createElementNS(svg_ns, 'g');
     stones_group.classList.add('stones');
     elements.push(stones_group);
 
-    return [elements, stones_group, highlight];
+    return [elements, stones_group, move_preview];
   }
 
   #make_line(x1, y1, x2, y2) {

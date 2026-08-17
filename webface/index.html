@@ -7,9 +7,32 @@
     <!--<link rel="stylesheet" href="style.css">-->
     <script type="module">
       import { Board } from './board.js';
+
+      function replace_char(s, i, c) {
+        return s.slice(0, i) + c + s.slice(i + 1);
+      }
+      
+      var stones = new Array(13).fill('.'.repeat(13));
+      var mask = [...stones];
+      var side_to_move = 'black';
+
       var b = new Board("board", 13);
-      b.set_stones(['xxxx....oooo', '...x..oo...', '.x.o.x.o']);
-      b.on_click = (row, col) => console.log("Click", row, col);
+      b.set_stones(stones);
+      b.set_move_preview(side_to_move, null)
+      b.on_click = (row, col) => {
+        console.log("Click", row, col);
+
+        if (mask[row][col] == 'x') {
+          return;
+        }
+
+        stones[row] = replace_char(stones[row], col, side_to_move == 'black' ? 'x' : 'o');
+        mask[row] = replace_char(mask[row], col, 'x');
+        side_to_move = side_to_move == 'black' ? 'white' : 'black';
+
+        b.set_stones(stones);
+        b.set_move_preview(side_to_move, mask);
+      };
     </script>
   </head>
   <body style="display: flex; height: 100vh; margin: 0">
