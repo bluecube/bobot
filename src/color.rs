@@ -57,6 +57,14 @@ impl<T> ColorMap<T> {
         }
     }
 
+    /// Returns a `ColorMap` with function `f` applied to each element.
+    /// Black is processed first, then White.
+    pub fn map_ref<U>(&self, f: impl FnMut(&T) -> U) -> ColorMap<U> {
+        ColorMap {
+            values: self.values.each_ref().map(f),
+        }
+    }
+
     /// Borrows each held element and returns colormap of references.
     pub fn as_ref(&self) -> ColorMap<&T> {
         ColorMap {
@@ -93,9 +101,16 @@ impl<T> ColorMap<T> {
     }
 }
 
+impl<T: IntoIterator> ColorMap<T> {
+    pub fn zip(self) -> impl Iterator<Item = ColorMap<T::Item>> {
+        let [b, w] = self.values;
+        b.into_iter().zip(w).map(|(b, w)| [b, w].into())
+    }
+}
+
 impl<T: Debug> Debug for ColorMap<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_map().entries(self.as_ref().into_iter()).finish()
+        f.debug_map().entries(self.as_ref()).finish()
     }
 }
 
@@ -267,6 +282,12 @@ mod test {
         }
 
         #[test]
+        fn map_ref() {
+            let colormap = ColorMap::from([1, 2]);
+            assert_eq!(colormap.map_ref(|x| 10 * x).to_array(), [10, 20]);
+        }
+
+        #[test]
         fn map_order() {
             let colormap = ColorMap::from([9, 8]);
             let mut counter = 0;
@@ -278,6 +299,20 @@ mod test {
                     })
                     .to_array(),
                 [1, 2]
+            );
+        }
+
+        #[test]
+        fn zip() {
+            let colormap = ColorMap::from([0..3, 10..13]);
+
+            assert_eq!(
+                colormap.zip().collect::<Vec<_>>(),
+                vec![
+                    ColorMap::from([0, 10]),
+                    ColorMap::from([1, 11]),
+                    ColorMap::from([2, 12])
+                ]
             );
         }
     }

@@ -83,20 +83,13 @@ impl Bitboard16 {
     }
 
     /// Generates a viewable string represetnation of the board, compatible with
-    /// `Self::from_ascii`. This function implicitly masks content to the board size,
-    /// pass 16 to see everything.
-    /// Panics on out of range `board_size`.
-    pub fn format_ascii(&self, board_size: usize) -> String {
-        assert!(board_size <= 16);
-        let mut s = String::with_capacity(board_size * (board_size + 1));
-        for row_bits in self.bits.as_array().iter().cloned().take(board_size) {
-            for col in 0..board_size {
-                s.push(if (row_bits >> col) & 1 != 0 { 'x' } else { '.' });
-            }
-            s.push('\n');
-        }
-
-        s
+    /// `Self::from_ascii`.
+    /// Empty positions are drawn as `'.'` if within a `pad_to` by `pad_to` square,
+    /// otherwise only if followed by a set position.
+    /// Set cells are drawn as `'x'`.
+    /// Panics on out of range `pad_to`.
+    pub fn format_ascii(&self, pad_to: usize) -> String {
+        format_ascii_helper(self.iter_rows(), |x| x.then_some('x'), pad_to)
     }
 
     /// Calculates the number of set bits in the bitboard
@@ -137,6 +130,16 @@ impl Bitboard16 {
                 Some(group)
             }
         })
+    }
+
+    pub fn iter_rows(self) -> impl Iterator<Item = RowIterator> {
+        self.bits
+            .to_array()
+            .into_iter()
+            .map(|row_bits| RowIterator {
+                bits: row_bits,
+                pos: 0,
+            })
     }
 
     /// Extracts a bitboard that is a subset of `self` and has a single bit set
@@ -395,6 +398,101 @@ impl Not for Bitboard16 {
     }
 }
 
+/// Iterates over bits of a row, returning true for set positions and false for unset ones.
+#[derive(Copy, Clone, Debug)]
+pub struct RowIterator {
+    bits: u16,
+    pos: u16,
+}
+
+impl Iterator for RowIterator {
+    type Item = bool;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.pos < 16 {
+            let v = (self.bits >> self.pos) & 1 != 0;
+            self.pos += 1;
+            Some(v)
+        } else {
+            None
+        }
+    }
+}
+
+/// Helper to format a bitboard to ascii.
+/// Empty positions are drawn as `'.'` if within a `pad_to` by `pad_to` square,
+/// otherwise only if followed by a set position.
+/// - `rows_iterator`: Iterator of rows, each of those is an iterator of cells.
+/// - `cell_fn`: Applied to every cell in the iterator output to get the character, or None for empty cell;
+///
+/// Panics on out of range (> 16) `pad_to` or if rows_iterator or any of the first `pad_to`
+/// cell iterators has less entries than `pad_to`.
+pub(crate) fn format_ascii_helper<RowsIterator, CellFn>(
+    rows_iterator: RowsIterator,
+    mut cell_fn: CellFn,
+    pad_to: usize,
+) -> String
+where
+    RowsIterator: IntoIterator,
+    RowsIterator::Item: IntoIterator,
+    CellFn: FnMut(<RowsIterator::Item as IntoIterator>::Item) -> Option<char>,
+{
+    assert!(pad_to <= 16);
+
+    let mut result = String::with_capacity(pad_to * (pad_to + 1));
+    let mut pending_rows = 0;
+    let mut n_rows = 0;
+
+    for (row, row_data) in rows_iterator.into_iter().enumerate() {
+        n_rows += 1;
+
+        let mut pending_cols = 0;
+        let mut is_row_empty = true;
+        let mut n_cols = 0;
+        for (col, cell) in row_data.into_iter().enumerate() {
+            n_cols += 1;
+            match cell_fn(cell) {
+                Some(c) => {
+                    for _ in 0..pending_rows {
+                        result.push('\n');
+                    }
+                    pending_rows = 0;
+                    for _ in 0..pending_cols {
+                        result.push('.');
+                    }
+                    pending_cols = 0;
+                    result.push(c);
+                    is_row_empty = false;
+                }
+                None if (row < pad_to) & (col < pad_to) => {
+                    assert_eq!(pending_rows, 0);
+                    assert_eq!(pending_cols, 0);
+                    result.push('.');
+                    is_row_empty = false;
+                }
+                _ => {
+                    pending_cols += 1;
+                }
+            }
+        }
+
+        if row < pad_to {
+            assert!(n_cols >= pad_to);
+        }
+
+        if is_row_empty {
+            assert!(row >= pad_to);
+            pending_rows += 1;
+        } else {
+            result.push('\n');
+        }
+    }
+
+    assert!(n_rows >= pad_to);
+
+    result
+}
+
 #[cfg(test)]
 impl proptest::arbitrary::Arbitrary for Bitboard16 {
     type Parameters = ();
@@ -528,26 +626,60 @@ mod test {
     mod ascii {
         use super::*;
 
-        #[test]
-        fn example() {
-            let bb = Bitboard16::from_ascii(
-                ".........\n\
-                 x........\n\
-                 .....x...\n\
-                 ....x....\n",
-            );
+        #[property_test]
+        fn roundtrip(bb: Bitboard16, #[strategy = 0usize..=16usize] pad_to: usize) {
+            let s = bb.format_ascii(pad_to);
 
-            assert!(bb.get(1, 0));
-            assert!(bb.get(2, 5));
-            assert!(bb.get(3, 4));
+            assert_eq!(Bitboard16::from_ascii(&s), bb);
         }
 
         #[property_test]
-        fn roundtrip(bb: Bitboard16, #[strategy = 0usize..=16usize] board_size: usize) {
-            let masked = bb & Bitboard16::board_mask(board_size);
-            let s = bb.format_ascii(board_size);
+        fn padding(bb: Bitboard16, #[strategy = 0usize..=16usize] pad_to: usize) {
+            let s = bb.format_ascii(pad_to);
 
-            assert_eq!(Bitboard16::from_ascii(&s), masked);
+            assert!(s.lines().count() >= pad_to);
+            assert!(s.lines().take(pad_to).all(|l| l.len() >= pad_to))
+        }
+
+        #[property_test]
+        fn compacting(bb: Bitboard16) {
+            let s = bb.format_ascii(0);
+
+            assert!(s.lines().all(|l| l.is_empty() || l.ends_with('x')));
+            assert!(s.lines().last().is_none_or(|l| !l.is_empty()));
+        }
+
+        mod examples {
+            use super::*;
+
+            #[test]
+            fn from_ascii() {
+                let bb = Bitboard16::from_ascii(
+                    ".........\n\
+                     x........\n\
+                     .....x...\n\
+                     ....x....\n",
+                );
+
+                assert!(bb.get(1, 0));
+                assert!(bb.get(2, 5));
+                assert!(bb.get(3, 4));
+            }
+
+            #[test]
+            fn padding_empty() {
+                let bb = Bitboard16::new();
+                assert_eq!(bb.format_ascii(4), "....\n....\n....\n....\n")
+            }
+
+            #[test]
+            fn padding_over() {
+                let bb = Bitboard16::single(10, 10);
+                assert_eq!(
+                    bb.format_ascii(4),
+                    "....\n....\n....\n....\n\n\n\n\n\n\n..........x\n"
+                )
+            }
         }
     }
 
@@ -615,6 +747,35 @@ mod test {
                     assert_eq!(group.popcnt(), 1);
                 }
             }
+        }
+    }
+
+    mod iter_rows {
+        use super::*;
+
+        #[property_test]
+        fn popcnt(bb: Bitboard16) {
+            assert_eq!(bb.iter_rows().flatten().filter(|b| *b).count(), bb.popcnt());
+        }
+
+        #[property_test]
+        fn row_count(bb: Bitboard16) {
+            assert_eq!(bb.iter_rows().count(), 16);
+        }
+
+        #[property_test]
+        fn col_count(bb: Bitboard16) {
+            assert!(bb.iter_rows().all(|row| row.count() == 16));
+        }
+
+        #[property_test]
+        fn get_bits(bb: Bitboard16) {
+            assert!(
+                bb.iter_rows()
+                    .enumerate()
+                    .flat_map(|(r, r_iter)| r_iter.enumerate().map(move |(c, bit)| (r, c, bit)))
+                    .all(|(r, c, b)| bb.get(r, c) == b)
+            )
         }
     }
 

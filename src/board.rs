@@ -1,5 +1,5 @@
 use crate::{
-    bitboard::Bitboard16,
+    bitboard::{Bitboard16, format_ascii_helper},
     color::{Color, ColorMap},
 };
 
@@ -15,11 +15,13 @@ pub struct Board {
 }
 
 impl Board {
+    const SIZE: usize = 13;
+
     /// Returns a set of empty positions on the board.
     pub fn empty(&self) -> Bitboard16 {
         let occupied = self.stones[Color::Black] | self.stones[Color::White];
-        Bitboard16::board_mask(13) & !occupied
-        // TODO: Don't hardcode size, don't rebuild mask.
+        Bitboard16::board_mask(Self::SIZE) & !occupied
+        // TODO: don't rebuild mask?
     }
 
     /// Plays a single stone.
@@ -66,12 +68,10 @@ impl Board {
     }
 
     pub fn score(&self) -> ColorMap<usize> {
-        let neighbors = self.stones.as_ref().map(|stones| stones.dilate());
-        let mut score = self.stones.as_ref().map(|stones| stones.popcnt());
+        let neighbors = self.stones.map_ref(|stones| stones.dilate());
+        let mut score = self.stones.map_ref(|stones| stones.popcnt());
         for empty_group in self.empty().iter_groups() {
-            let adjanced_to = neighbors
-                .as_ref()
-                .map(|neighbors| !(empty_group & neighbors).is_empty());
+            let adjanced_to = neighbors.map_ref(|neighbors| !(empty_group & neighbors).is_empty());
             if adjanced_to[Color::Black] && adjanced_to[Color::White] {
                 // Neutral
                 continue;
@@ -98,5 +98,25 @@ impl Board {
         }
 
         legal
+    }
+
+    /// Generates a viewable string represetnation of the board.
+    /// Empty positions are drawn as `'.'`, black stones as `'x'`, white stones as `'o'`.
+    /// If `compact` is `true`, fills all unused places in the 13x13 area by `.`, otherwise only
+    /// positions followed by non-empty are printed.
+    pub fn format_ascii(&self, compact: bool) -> String {
+        format_ascii_helper(
+            self.stones
+                .map_ref(|b| b.iter_rows())
+                .zip()
+                .map(ColorMap::zip),
+            |x| match x.to_array() {
+                [true, true] => unreachable!(),
+                [true, false] => Some('x'),
+                [false, true] => Some('o'),
+                [false, false] => None,
+            },
+            if compact { 0 } else { Self::SIZE },
+        )
     }
 }
