@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bobot webface</title>
+    <!--<link rel="stylesheet" href="style.css">-->
+    <script type="module">
+      import { Board } from '../board.js';
+
+      function parse_game_state(json) {
+        return [
+          json['board'].split('\n'),
+          json['legal_moves'].split('\n')
+        ];
+      }
+
+      async function get_game_state() {
+        const response = await fetch(window.location.href + "/state");
+        if (!response.ok) {
+          throw new Error(`Response status: ${response.status}`);
+        }
+
+        return parse_game_state(await response.json());
+      }
+
+      async function play_move(row, col) {
+        const response = await fetch(
+          window.location.href + "/move",
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ row: row, col: col})
+          });
+        if (!response.ok) {
+          throw new Error(`Response status: ${response.status}`);
+        }
+
+        return parse_game_state(await response.json());
+      }
+
+      function place_stone(stones, row, col, char) {
+        const out = [...stones];
+        while (out.length <= row)
+          out.push('');
+        const line = out[row];
+        out[row] = line.slice(0, col).padEnd(col, '.') + char + line.slice(col + 1);
+        return out;
+      }
+
+      //const game_id = window.location.pathname.match(/\d+$/)[0];
+
+      var b = new Board("board", 13);
+
+      var [stones, mask] = await get_game_state();
+      b.set_stones(stones);
+      b.set_move_preview('black', mask);
+      b.on_click = (row, col) => {
+        if (b.check_move_preview_mask([row, col])) {
+          console.log("Ignoring click on masked position", row, col)
+          return;
+        } else {
+          console.log("Playing", row, col);
+        }
+
+        // Immediate response:
+        stones = place_stone(stones, row, col, 'x');
+        b.set_stones(stones);
+        b.set_move_preview(null, null); // Disable previews while the computer move is in flight
+
+        play_move(row, col).then((response) => {
+          stones = response[0];
+          mask = response[1];
+          b.set_stones(stones);
+          b.set_move_preview('black', mask);
+        });
+      };
+    </script>
+  </head>
+  <body style="display: flex; height: 100vh; margin: 0">
+    <svg id="board" style="flex: 1; min-height: 0; min-width: 0"></svg>
+  </body>
+</html>

@@ -27,7 +27,7 @@ export class Board {
 
     this.#board.addEventListener('pointermove', (event) => {
       const pos = this.#board_coordinates(event);
-      if (pos === null || this.#check_move_preview_mask(pos))
+      if (pos === null || this.check_move_preview_mask(pos))
         this.#hide_move_preview();
       else {
         this.#place_move_preview(pos);
@@ -82,7 +82,7 @@ export class Board {
       return;
     }
 
-    if (this.#check_move_preview_mask(this.#move_preview_last_pos)) {
+    if (this.check_move_preview_mask(this.#move_preview_last_pos)) {
       this.#hide_move_preview();
     }
 
@@ -105,7 +105,7 @@ export class Board {
   }
 
   /// Returns true if the move preview should be hidden at the given position.
-  #check_move_preview_mask(pos) {
+  check_move_preview_mask(pos) {
     const [row, col] = pos;
     return !(this.#move_preview_mask?.[row]?.[col] !== 'x');
   }

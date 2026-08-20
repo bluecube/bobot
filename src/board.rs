@@ -17,8 +17,12 @@ pub struct Board {
 impl Board {
     const SIZE: usize = 13;
 
+    pub fn new() -> Board {
+        Board::default()
+    }
+
     /// Returns a set of empty positions on the board.
-    pub fn empty(&self) -> Bitboard16 {
+    pub fn empty_positions(&self) -> Bitboard16 {
         let occupied = self.stones[Color::Black] | self.stones[Color::White];
         Bitboard16::board_mask(Self::SIZE) & !occupied
         // TODO: don't rebuild mask?
@@ -28,7 +32,7 @@ impl Board {
     /// Returns next board state if the move was valid, Err if was invalid.
     /// Panics when playing outside 16x16.
     pub fn play_stone(&self, row: usize, col: usize, color: Color) -> Result<Board, MoveError> {
-        let empty = self.empty();
+        let empty = self.empty_positions();
         let current_move = Bitboard16::single(row, col);
 
         if (current_move & empty).is_empty() {
@@ -70,7 +74,7 @@ impl Board {
     pub fn score(&self) -> ColorMap<usize> {
         let neighbors = self.stones.map_ref(|stones| stones.dilate());
         let mut score = self.stones.map_ref(|stones| stones.popcnt());
-        for empty_group in self.empty().iter_groups() {
+        for empty_group in self.empty_positions().iter_groups() {
             let adjanced_to = neighbors.map_ref(|neighbors| !(empty_group & neighbors).is_empty());
             if adjanced_to[Color::Black] && adjanced_to[Color::White] {
                 // Neutral
@@ -89,7 +93,7 @@ impl Board {
     }
 
     pub fn legal_moves(&self, color: Color) -> Bitboard16 {
-        let empty = self.empty();
+        let empty = self.empty_positions();
         let mut legal = empty;
         for (r, c) in empty.iter_positions() {
             if self.play_stone(r, c, color).is_err() {
