@@ -7,7 +7,7 @@ use axum::{
     response::{Html, IntoResponse, Json, Redirect},
     routing::{get, post},
 };
-use bobot::{Board, Color};
+use bobot::{Bitboard16, Board, Color, Position};
 use dashmap::DashMap;
 use rand::RngExt as _;
 use serde::{Deserialize, Serialize};
@@ -28,7 +28,12 @@ impl Game {
     fn make_response(&self) -> GameStateResponse {
         GameStateResponse {
             board: self.board.format_ascii(true),
-            legal_moves: (!self.board.legal_moves(Color::Black)).format_ascii(0),
+            legal_moves: (!Bitboard16::from_iter(
+                self.board
+                    .legal_moves(Color::Black)
+                    .map(|(pos, _board)| pos),
+            ))
+            .format_ascii(0),
         }
     }
 }
@@ -41,8 +46,7 @@ struct GameStateResponse {
 
 #[derive(Deserialize)]
 struct PlayMove {
-    row: usize,
-    col: usize,
+    position: Position,
 }
 
 #[tokio::main]
@@ -107,7 +111,7 @@ async fn play_move(
 
     game.board = game
         .board
-        .play_stone(next_move.row, next_move.col, Color::Black)
+        .play_stone(next_move.position, Color::Black)
         .map_err(|_| StatusCode::CONFLICT)?;
 
     game.board = random_move(&game.board, Color::White);
@@ -121,11 +125,11 @@ fn random_move(board: &Board, color: Color) -> Board {
 
     while !candidates.is_empty() {
         let i = rng.random_range(0..candidates.popcnt());
-        let (r, c) = candidates.iter_positions().skip(i).next().unwrap();
-        if let Ok(new_board) = board.play_stone(r, c, color) {
+        let pos = candidates.iter_positions().skip(i).next().unwrap();
+        if let Ok(new_board) = board.play_stone(pos, color) {
             return new_board;
         } else {
-            candidates.set(r, c, false);
+            candidates.set(pos, false);
         }
     }
 

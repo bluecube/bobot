@@ -30,7 +30,7 @@
           {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ row: row, col: col})
+            body: JSON.stringify({position: { row: row, col: col}})
           });
         if (!response.ok) {
           throw new Error(`Response status: ${response.status}`);

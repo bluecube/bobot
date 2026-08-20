@@ -4,6 +4,7 @@ use std::{
 };
 
 use bit_iter::BitIter;
+use serde::{Deserialize, Serialize};
 use wide::{u16x16, u64x4};
 
 /// Bitboard for represetnting positions on a board.
@@ -11,6 +12,28 @@ use wide::{u16x16, u64x4};
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub struct Bitboard16 {
     bits: u16x16,
+}
+
+/// Position on the board
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Position {
+    row: usize,
+    col: usize,
+}
+
+impl Position {
+    pub fn new(row: usize, col: usize) -> Self {
+        Self { row, col }
+    }
+}
+
+impl From<(usize, usize)> for Position {
+    fn from(value: (usize, usize)) -> Self {
+        Position {
+            row: value.0,
+            col: value.1,
+        }
+    }
 }
 
 impl Default for Bitboard16 {
@@ -28,9 +51,9 @@ impl Bitboard16 {
     }
 
     /// Creates a bitboard with a single position set.
-    pub fn single(row: usize, col: usize) -> Self {
+    pub fn single(pos: Position) -> Self {
         let mut bb = Self::new();
-        bb.set(row, col, true);
+        bb.set(pos, true);
         bb
     }
 
@@ -46,22 +69,22 @@ impl Bitboard16 {
 
     /// Returns a value of a single bit. Slow.
     /// Panics on out of range index.
-    pub fn get(&self, row: usize, col: usize) -> bool {
-        assert!(row < 16);
-        assert!(col < 16);
-        (self.bits.as_array()[row] >> col) & 1 != 0
+    pub fn get(&self, pos: Position) -> bool {
+        assert!(pos.row < 16);
+        assert!(pos.col < 16);
+        (self.bits.as_array()[pos.row] >> pos.col) & 1 != 0
     }
 
     /// Sets a value of a single bit. Slow.
     /// Panics on out of range index.
-    pub fn set(&mut self, row: usize, col: usize, value: bool) {
-        assert!(row < 16);
-        assert!(col < 16);
-        let row = &mut self.bits.as_mut_array()[row];
+    pub fn set(&mut self, pos: Position, value: bool) {
+        assert!(pos.row < 16);
+        assert!(pos.col < 16);
+        let row = &mut self.bits.as_mut_array()[pos.row];
         if value {
-            *row |= 1 << col;
+            *row |= 1 << pos.col;
         } else {
-            *row &= !(1 << col);
+            *row &= !(1 << pos.col);
         }
     }
 
@@ -74,7 +97,7 @@ impl Bitboard16 {
         for (row_number, line) in s.lines().enumerate() {
             for (col_number, c) in line.chars().enumerate() {
                 if c == 'x' {
-                    bb.set(row_number, col_number, true);
+                    bb.set(Position::new(row_number, col_number), true);
                 }
             }
         }
@@ -108,12 +131,14 @@ impl Bitboard16 {
     }
 
     /// Returns iterator over positions (`(row, col)`) of set bits.
-    pub fn iter_positions(self) -> impl Iterator<Item = (usize, usize)> {
+    pub fn iter_positions(self) -> impl Iterator<Item = Position> {
         self.bits
             .to_array()
             .into_iter()
             .enumerate()
-            .flat_map(|(row, row_bits)| BitIter::from(row_bits).map(move |col| (row, col)))
+            .flat_map(|(row, row_bits)| {
+                BitIter::from(row_bits).map(move |col| Position::new(row, col))
+            })
     }
 
     /// Returns an iterator over maximal disjoint 4-connected subsets of `self`.
@@ -398,6 +423,16 @@ impl Not for Bitboard16 {
     }
 }
 
+impl FromIterator<Position> for Bitboard16 {
+    fn from_iter<T: IntoIterator<Item = Position>>(iter: T) -> Self {
+        let mut bb = Bitboard16::new();
+        for pos in iter {
+            bb.set(pos, true);
+        }
+        bb
+    }
+}
+
 /// Iterates over bits of a row, returning true for set positions and false for unset ones.
 #[derive(Copy, Clone, Debug)]
 pub struct RowIterator {
@@ -509,7 +544,7 @@ impl proptest::arbitrary::Arbitrary for Bitboard16 {
                 let mut bb = Bitboard16::new();
                 for (i, set) in v.iter().enumerate() {
                     if *set {
-                        bb.set(i / 16, i % 16, true);
+                        bb.set(Position::new(i / 16, i % 16), true);
                     }
                 }
                 bb
@@ -519,8 +554,8 @@ impl proptest::arbitrary::Arbitrary for Bitboard16 {
             proptest::collection::hash_set((0usize..16usize, 0usize..16usize), 0usize..64usize)
                 .prop_map(|set| {
                     let mut bb = Bitboard16::new();
-                    for (r, c) in set {
-                        bb.set(r, c, true);
+                    for pos in set {
+                        bb.set(pos.into(), true);
                     }
 
                     bb
@@ -534,13 +569,13 @@ impl proptest::arbitrary::Arbitrary for Bitboard16 {
 
 #[cfg(test)]
 mod test {
-    use crate::bitboard::Bitboard16;
+    use crate::bitboard::{Bitboard16, Position};
     use proptest::property_test;
 
     fn transpose(bb: Bitboard16) -> Bitboard16 {
         let mut output = Bitboard16::new();
-        for (r, c) in bb.iter_positions() {
-            output.set(c, r, true);
+        for pos in bb.iter_positions() {
+            output.set(Position::new(pos.col, pos.row), true);
         }
         output
     }
@@ -556,7 +591,7 @@ mod test {
 
         for row in 0..16 {
             for col in 0..16 {
-                assert!(!bb.get(row, col));
+                assert!(!bb.get(Position::new(row, col)));
             }
         }
     }
@@ -565,11 +600,11 @@ mod test {
     fn set_five() {
         let mut bb = Bitboard16::new();
 
-        bb.set(0, 0, true);
-        bb.set(3, 7, true);
-        bb.set(1, 15, true);
-        bb.set(15, 14, true);
-        bb.set(8, 4, true);
+        bb.set(Position::new(0, 0), true);
+        bb.set(Position::new(3, 7), true);
+        bb.set(Position::new(1, 15), true);
+        bb.set(Position::new(15, 14), true);
+        bb.set(Position::new(8, 4), true);
 
         assert_eq!(bb.popcnt(), 5);
     }
@@ -586,9 +621,9 @@ mod test {
         for row in 0usize..16usize {
             for col in 0usize..16usize {
                 if (row < board_size) & (col < board_size) {
-                    assert!(bb.get(row, col));
+                    assert!(bb.get(Position::new(row, col)));
                 } else {
-                    assert!(!bb.get(row, col));
+                    assert!(!bb.get(Position::new(row, col)));
                 }
             }
         }
@@ -596,8 +631,8 @@ mod test {
 
     #[property_test]
     fn iterator_bits_are_set(bb: Bitboard16) {
-        for (row, col) in bb.iter_positions() {
-            assert!(bb.get(row, col));
+        for pos in bb.iter_positions() {
+            assert!(bb.get(pos));
         }
     }
 
@@ -605,8 +640,8 @@ mod test {
     fn copy_using_set_is_equal(bb: Bitboard16) {
         let mut copy = Bitboard16::new();
 
-        for (row, col) in bb.iter_positions() {
-            copy.set(row, col, true);
+        for pos in bb.iter_positions() {
+            copy.set(pos, true);
         }
 
         assert_eq!(copy, bb);
@@ -616,8 +651,8 @@ mod test {
     fn clear_using_set_is_empty(bb: Bitboard16) {
         let mut copy = bb;
 
-        for (row, col) in bb.iter_positions() {
-            copy.set(row, col, false);
+        for pos in bb.iter_positions() {
+            copy.set(pos, false);
         }
 
         assert!(copy.is_empty());
@@ -661,9 +696,9 @@ mod test {
                      ....x....\n",
                 );
 
-                assert!(bb.get(1, 0));
-                assert!(bb.get(2, 5));
-                assert!(bb.get(3, 4));
+                assert!(bb.get(Position::new(1, 0)));
+                assert!(bb.get(Position::new(2, 5)));
+                assert!(bb.get(Position::new(3, 4)));
             }
 
             #[test]
@@ -674,7 +709,7 @@ mod test {
 
             #[test]
             fn padding_over() {
-                let bb = Bitboard16::single(10, 10);
+                let bb = Bitboard16::single(Position::new(10, 10));
                 assert_eq!(
                     bb.format_ascii(4),
                     "....\n....\n....\n....\n\n\n\n\n\n\n..........x\n"
@@ -739,7 +774,7 @@ mod test {
                     for i in 0..8 {
                         let c = 2 * i + r % 2;
 
-                        bb.set(r, c, true);
+                        bb.set(Position::new(r, c), true);
                     }
                 }
 
@@ -774,7 +809,7 @@ mod test {
                 bb.iter_rows()
                     .enumerate()
                     .flat_map(|(r, r_iter)| r_iter.enumerate().map(move |(c, bit)| (r, c, bit)))
-                    .all(|(r, c, b)| bb.get(r, c) == b)
+                    .all(|(r, c, b)| bb.get(Position::new(r, c)) == b)
             )
         }
     }
@@ -788,9 +823,9 @@ mod test {
             /// Implements a general shift by using single bit access to act as a baseline
             fn reference(bb: Bitboard16, dr: isize, dc: isize) -> Bitboard16 {
                 let mut result = Bitboard16::new();
-                for (r, c) in bb.iter_positions() {
-                    let r = r as isize + dr;
-                    let c = c as isize + dc;
+                for pos in bb.iter_positions() {
+                    let r = pos.row as isize + dr;
+                    let c = pos.col as isize + dc;
 
                     if !(0isize..16isize).contains(&r) {
                         continue;
@@ -800,7 +835,7 @@ mod test {
                         continue;
                     }
 
-                    result.set(r as usize, c as usize, true);
+                    result.set(Position::new(r as usize, c as usize), true);
                 }
 
                 result
@@ -832,22 +867,38 @@ mod test {
 
             #[test]
             fn left() {
-                assert!(Bitboard16::single(5, 0).shift_left(1).is_empty());
+                assert!(
+                    Bitboard16::single(Position::new(5, 0))
+                        .shift_left(1)
+                        .is_empty()
+                );
             }
 
             #[test]
             fn right() {
-                assert!(Bitboard16::single(5, 15).shift_right(1).is_empty());
+                assert!(
+                    Bitboard16::single(Position::new(5, 15))
+                        .shift_right(1)
+                        .is_empty()
+                );
             }
 
             #[test]
             fn up() {
-                assert!(Bitboard16::single(0, 5).shift_up(1).is_empty());
+                assert!(
+                    Bitboard16::single(Position::new(0, 5))
+                        .shift_up(1)
+                        .is_empty()
+                );
             }
 
             #[test]
             fn down() {
-                assert!(Bitboard16::single(15, 5).shift_down(1).is_empty());
+                assert!(
+                    Bitboard16::single(Position::new(15, 5))
+                        .shift_down(1)
+                        .is_empty()
+                );
             }
         }
 
@@ -867,18 +918,18 @@ mod test {
 
         #[test]
         fn up_accross_half() {
-            let bb = Bitboard16::single(8, 5).shift_up(1);
+            let bb = Bitboard16::single(Position::new(8, 5)).shift_up(1);
 
             assert_eq!(bb.popcnt(), 1);
-            assert!(bb.get(7, 5))
+            assert!(bb.get(Position::new(7, 5)))
         }
 
         #[test]
         fn down_accross_half() {
-            let bb = Bitboard16::single(7, 5).shift_down(1);
+            let bb = Bitboard16::single(Position::new(7, 5)).shift_down(1);
 
             assert_eq!(bb.popcnt(), 1);
-            assert!(bb.get(8, 5))
+            assert!(bb.get(Position::new(8, 5)))
         }
     }
 
@@ -890,7 +941,7 @@ mod test {
             #[strategy = 0usize..16usize] row: usize,
             #[strategy = 0usize..16usize] col: usize,
         ) {
-            let bb = Bitboard16::single(row, col);
+            let bb = Bitboard16::single(Position::new(row, col));
 
             let expected_count = 1
                 + if (row == 0) | (row == 15) { 1 } else { 2 }
@@ -926,54 +977,54 @@ mod test {
             // vectorized code, but it's still a good test.
 
             let mut bb = Bitboard16::new();
-            bb.set(7, 2, true);
-            bb.set(8, 6, true);
+            bb.set(Position::new(7, 2), true);
+            bb.set(Position::new(8, 6), true);
 
             let bb = bb.dilate();
 
-            assert!(bb.get(6, 2));
-            assert!(bb.get(7, 1));
-            assert!(bb.get(7, 2));
-            assert!(bb.get(7, 3));
-            assert!(bb.get(8, 2));
+            assert!(bb.get(Position::new(6, 2)));
+            assert!(bb.get(Position::new(7, 1)));
+            assert!(bb.get(Position::new(7, 2)));
+            assert!(bb.get(Position::new(7, 3)));
+            assert!(bb.get(Position::new(8, 2)));
 
-            assert!(bb.get(7, 6));
-            assert!(bb.get(8, 5));
-            assert!(bb.get(8, 6));
-            assert!(bb.get(8, 7));
-            assert!(bb.get(9, 6));
+            assert!(bb.get(Position::new(7, 6)));
+            assert!(bb.get(Position::new(8, 5)));
+            assert!(bb.get(Position::new(8, 6)));
+            assert!(bb.get(Position::new(8, 7)));
+            assert!(bb.get(Position::new(9, 6)));
 
             assert_eq!(bb.popcnt(), 10);
         }
 
         #[test]
         fn corner_zero() {
-            let bb = Bitboard16::single(0, 0);
+            let bb = Bitboard16::single(Position::new(0, 0));
 
             assert_eq!(bb.dilate().popcnt(), 3);
         }
 
         #[test]
         fn corner_max() {
-            let bb = Bitboard16::single(15, 15);
+            let bb = Bitboard16::single(Position::new(15, 15));
 
             assert_eq!(bb.dilate().popcnt(), 3);
         }
 
         fn dilate_reference(bb: Bitboard16) -> Bitboard16 {
             let mut output = bb;
-            for (r, c) in bb.iter_positions() {
+            for Position { row: r, col: c } in bb.iter_positions() {
                 if r > 0 {
-                    output.set(r - 1, c, true);
+                    output.set(Position::new(r - 1, c), true);
                 }
                 if r < 15 {
-                    output.set(r + 1, c, true);
+                    output.set(Position::new(r + 1, c), true);
                 }
                 if c > 0 {
-                    output.set(r, c - 1, true);
+                    output.set(Position::new(r, c - 1), true);
                 }
                 if c < 15 {
-                    output.set(r, c + 1, true);
+                    output.set(Position::new(r, c + 1), true);
                 }
             }
             output
@@ -1064,7 +1115,7 @@ mod test {
                      xxxxxxxxxxxxxxxx\n\
                      x...............",
                 );
-                let seed = Bitboard16::single(0, 0);
+                let seed = Bitboard16::single(Position::new(0, 0));
 
                 assert_eq!(seed.flood_fill(mask), mask);
                 assert_eq!(seed.flood_fill(transpose(mask)), transpose(mask));
@@ -1090,7 +1141,7 @@ mod test {
                      x..............x\n\
                      xxxxxxxxxxxxxxxx",
                 );
-                let seed = Bitboard16::single(0, 0);
+                let seed = Bitboard16::single(Position::new(0, 0));
 
                 assert_eq!(seed.flood_fill(mask), mask);
                 assert_eq!(seed.flood_fill(transpose(mask)), transpose(mask));
@@ -1099,7 +1150,7 @@ mod test {
             #[test]
             fn full() {
                 let mask = Bitboard16::board_mask(16);
-                let seed = Bitboard16::single(0, 0);
+                let seed = Bitboard16::single(Position::new(0, 0));
 
                 assert_eq!(seed.flood_fill(mask), mask);
             }
@@ -1120,8 +1171,8 @@ mod test {
                      ...xx....xxxxx..",
                 );
 
-                let seed1 = Bitboard16::single(5, 2);
-                let seed2 = Bitboard16::single(9, 13);
+                let seed1 = Bitboard16::single(Position::new(5, 2));
+                let seed2 = Bitboard16::single(Position::new(9, 13));
 
                 let ff1 = seed1.flood_fill(mask);
                 let ff2 = seed2.flood_fill(mask);
@@ -1150,7 +1201,7 @@ mod test {
                      ..............x\n\
                      ...............x",
                 );
-                let seed = Bitboard16::single(8, 8);
+                let seed = Bitboard16::single(Position::new(8, 8));
 
                 assert_eq!(seed.flood_fill(mask), seed);
             }
@@ -1158,7 +1209,7 @@ mod test {
             #[test]
             fn not_skipping_a_gap() {
                 let mask = Bitboard16::from_ascii("xxx.xx");
-                let seed = Bitboard16::single(0, 0);
+                let seed = Bitboard16::single(Position::new(0, 0));
 
                 assert_eq!(seed.flood_fill(mask).popcnt(), 3);
             }

@@ -1,5 +1,5 @@
 use crate::{
-    bitboard::{Bitboard16, format_ascii_helper},
+    bitboard::{Bitboard16, Position, format_ascii_helper},
     color::{Color, ColorMap},
 };
 
@@ -31,9 +31,9 @@ impl Board {
     /// Plays a single stone.
     /// Returns next board state if the move was valid, Err if was invalid.
     /// Panics when playing outside 16x16.
-    pub fn play_stone(&self, row: usize, col: usize, color: Color) -> Result<Board, MoveError> {
+    pub fn play_stone(&self, pos: Position, color: Color) -> Result<Board, MoveError> {
         let empty = self.empty_positions();
-        let current_move = Bitboard16::single(row, col);
+        let current_move = Bitboard16::single(pos);
 
         if (current_move & empty).is_empty() {
             return Err(MoveError::NonEmptyPosition);
@@ -92,16 +92,10 @@ impl Board {
         score
     }
 
-    pub fn legal_moves(&self, color: Color) -> Bitboard16 {
-        let empty = self.empty_positions();
-        let mut legal = empty;
-        for (r, c) in empty.iter_positions() {
-            if self.play_stone(r, c, color).is_err() {
-                legal.set(r, c, false);
-            }
-        }
-
-        legal
+    pub fn legal_moves(&self, color: Color) -> impl Iterator<Item = (Position, Board)> {
+        self.empty_positions()
+            .iter_positions()
+            .filter_map(move |pos| self.play_stone(pos, color).ok().map(|board| (pos, board)))
     }
 
     /// Generates a viewable string represetnation of the board.
