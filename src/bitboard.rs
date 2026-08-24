@@ -17,8 +17,8 @@ pub struct Bitboard16 {
 /// Position on the board
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Position {
-    row: usize,
-    col: usize,
+    pub row: usize,
+    pub col: usize,
 }
 
 impl Position {

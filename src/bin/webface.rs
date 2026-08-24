@@ -9,7 +9,6 @@ use axum::{
 };
 use bobot::{Bitboard16, Board, Color, Position};
 use dashmap::DashMap;
-use rand::RngExt as _;
 use serde::{Deserialize, Serialize};
 
 type GameId = u128;
@@ -114,24 +113,12 @@ async fn play_move(
         .play_stone(next_move.position, Color::Black)
         .map_err(|_| StatusCode::CONFLICT)?;
 
-    game.board = random_move(&game.board, Color::White);
-
-    Ok(Json(game.make_response()))
-}
-
-fn random_move(board: &Board, color: Color) -> Board {
-    let mut candidates = board.empty_positions();
-    let mut rng = rand::rng();
-
-    while !candidates.is_empty() {
-        let i = rng.random_range(0..candidates.popcnt());
-        let pos = candidates.iter_positions().skip(i).next().unwrap();
-        if let Ok(new_board) = board.play_stone(pos, color) {
-            return new_board;
-        } else {
-            candidates.set(pos, false);
-        }
+    if let Some(board) = game
+        .board
+        .play_random_legal_move(Color::White, &mut rand::rng())
+    {
+        game.board = board;
     }
 
-    Board::new()
+    Ok(Json(game.make_response()))
 }

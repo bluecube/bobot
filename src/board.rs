@@ -2,6 +2,7 @@ use crate::{
     bitboard::{Bitboard16, Position, format_ascii_helper},
     color::{Color, ColorMap},
 };
+use rand::RngExt as _;
 
 pub enum MoveError {
     NonEmptyPosition,
@@ -15,7 +16,7 @@ pub struct Board {
 }
 
 impl Board {
-    const SIZE: usize = 13;
+    pub const SIZE: usize = 13;
 
     pub fn new() -> Board {
         Board::default()
@@ -69,6 +70,26 @@ impl Board {
         Ok(Board {
             stones: ColorMap::from_perspective(color, own, opponents),
         })
+    }
+
+    pub fn play_random_legal_move(&self, color: Color, rng: &mut impl rand::Rng) -> Option<Board> {
+        // TODO: Perf: This could probably be made faster, somehow
+        //  - PDEP for selecting bits within lane
+        //  - Don't recalculate popcnt in every loop
+
+        let mut candidates = self.empty_positions();
+
+        while !candidates.is_empty() {
+            let i = rng.random_range(0..candidates.popcnt());
+            let pos = candidates.iter_positions().nth(i).unwrap();
+            if let Ok(new_board) = self.play_stone(pos, color) {
+                return Some(new_board);
+            } else {
+                candidates.set(pos, false);
+            }
+        }
+
+        None
     }
 
     pub fn score(&self) -> ColorMap<usize> {
