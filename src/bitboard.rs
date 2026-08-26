@@ -15,7 +15,7 @@ pub struct Bitboard16 {
 }
 
 /// Position on the board
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Hash)]
 pub struct Position {
     pub row: usize,
     pub col: usize,
@@ -530,38 +530,46 @@ where
 
 #[cfg(test)]
 impl proptest::arbitrary::Arbitrary for Bitboard16 {
-    type Parameters = ();
+    type Parameters = Option<usize>;
     type Strategy = proptest::strategy::BoxedStrategy<Bitboard16>;
 
-    fn arbitrary_with(_: Self::Parameters) -> Self::Strategy {
+    fn arbitrary_with(size: Self::Parameters) -> Self::Strategy {
         use proptest::prelude::Strategy;
 
+        let size = size.unwrap_or(16);
+        assert!(size <= 16);
+
+        if size == 0 {
+            return proptest::strategy::Just(Bitboard16::new()).boxed();
+        }
+
         let with_weights = (0f64..=1f64)
-            .prop_flat_map(|weight| {
-                proptest::collection::vec(proptest::bool::weighted(weight), 256)
+            .prop_flat_map(move |weight| {
+                proptest::collection::vec(proptest::bool::weighted(weight), size * size)
             })
-            .prop_map(|v| {
+            .prop_map(move |v| {
                 let mut bb = Bitboard16::new();
                 for (i, set) in v.iter().enumerate() {
                     if *set {
-                        bb.set(Position::new(i / 16, i % 16), true);
+                        bb.set(Position::new(i / size, i % size), true);
                     }
                 }
                 bb
             });
 
-        let sparse =
-            proptest::collection::hash_set((0usize..16usize, 0usize..16usize), 0usize..64usize)
-                .prop_map(|set| {
-                    let mut bb = Bitboard16::new();
-                    for pos in set {
-                        bb.set(pos.into(), true);
-                    }
+        let sparse = proptest::collection::hash_set(
+            (0usize..size, 0usize..size),
+            0usize..((size * size + 3) / 4),
+        )
+        .prop_map(|set| {
+            set.into_iter()
+                .map(|pos| pos.into())
+                .collect::<Bitboard16>()
+        });
 
-                    bb
-                });
-
-        let dense = sparse.clone().prop_map(|bb| !bb);
+        let dense = sparse
+            .clone()
+            .prop_map(move |bb| Bitboard16::board_mask(size) & !bb);
 
         proptest::prop_oneof![sparse, dense, with_weights].boxed()
     }
@@ -570,7 +578,7 @@ impl proptest::arbitrary::Arbitrary for Bitboard16 {
 #[cfg(test)]
 mod test {
     use crate::bitboard::{Bitboard16, Position};
-    use proptest::property_test;
+    use proptest::{property_test, strategy::Just};
 
     fn transpose(bb: Bitboard16) -> Bitboard16 {
         let mut output = Bitboard16::new();
@@ -578,6 +586,16 @@ mod test {
             output.set(Position::new(pos.col, pos.row), true);
         }
         output
+    }
+
+    #[property_test]
+    fn sized_bitboard_witin_mask(
+        #[strategy = (0usize..16usize)
+            .prop_flat_map(|s| (Just(s), Bitboard16::arbitrary_with(Some(s))))
+        ]
+        (size, bitboard): (usize, Bitboard16),
+    ) {
+        assert!((bitboard & !Bitboard16::board_mask(size)).is_empty());
     }
 
     #[test]

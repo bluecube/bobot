@@ -7,15 +7,15 @@ use axum::{
     response::{Html, IntoResponse, Json, Redirect},
     routing::{get, post},
 };
-use bobot::{Bitboard16, Board, Color, Position};
+use bobot::{Bitboard16, Board, Color, Position, ZobristHasher};
 use dashmap::DashMap;
 use serde::{Deserialize, Serialize};
 
 type GameId = u128;
 
-#[derive(Default)]
 struct AppState {
     games: DashMap<GameId, Game>,
+    hasher: ZobristHasher,
 }
 
 #[derive(Clone, Default)]
@@ -24,12 +24,12 @@ struct Game {
 }
 
 impl Game {
-    fn make_response(&self) -> GameStateResponse {
+    fn make_response(&self, hasher: &ZobristHasher) -> GameStateResponse {
         GameStateResponse {
             board: self.board.format_ascii(true),
             legal_moves: (!Bitboard16::from_iter(
                 self.board
-                    .legal_moves(Color::Black)
+                    .legal_moves(Color::Black, hasher)
                     .map(|(pos, _board)| pos),
             ))
             .format_ascii(0),
@@ -57,7 +57,10 @@ async fn main() {
         .route("/games/{game_id}", get(game_html))
         .route("/games/{game_id}/state", get(game_state))
         .route("/games/{game_id}/move", post(play_move))
-        .with_state(Arc::new(AppState::default()));
+        .with_state(Arc::new(AppState {
+            games: DashMap::default(),
+            hasher: ZobristHasher::new(Board::SIZE, &mut rand::rng()),
+        }));
 
     // run it
     let listener = tokio::net::TcpListener::bind("127.0.0.1:3000")
@@ -97,7 +100,7 @@ async fn game_state(
 ) -> Result<Json<GameStateResponse>, StatusCode> {
     let game = app.games.get(&game_id).ok_or(StatusCode::NOT_FOUND)?;
 
-    Ok(Json(game.make_response()))
+    Ok(Json(game.make_response(&app.hasher)))
 }
 
 #[axum::debug_handler]
@@ -110,15 +113,15 @@ async fn play_move(
 
     game.board = game
         .board
-        .play_stone(next_move.position, Color::Black)
+        .play_stone(next_move.position, Color::Black, &app.hasher)
         .map_err(|_| StatusCode::CONFLICT)?;
 
-    if let Some(board) = game
-        .board
-        .play_random_legal_move(Color::White, &mut rand::rng())
+    if let Some(board) =
+        game.board
+            .play_random_legal_move(Color::White, &app.hasher, &mut rand::rng())
     {
         game.board = board;
     }
 
-    Ok(Json(game.make_response()))
+    Ok(Json(game.make_response(&app.hasher)))
 }
