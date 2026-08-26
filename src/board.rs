@@ -27,6 +27,9 @@ pub enum BoardInvariantError {
 ///   - No stones outside of SIZE x SIZE.
 ///   - No zero liberty groups.
 ///   - Precomputed hash in `hash()` is always correct and would match `rehash()` result.
+///
+/// Compared to Bitboard16 Board also has stronger protections on inputs, so it can be used
+/// from unverified user input.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct Board {
     stones: ColorMap<Bitboard16>,
@@ -51,8 +54,8 @@ impl Board {
             stones,
             hash: ZobristHash::default(),
         };
-        board.hash = board.rehash(hasher);
-        board.check_invariants(hasher)?;
+        board.check_stone_invariants()?;
+        board.hash = board.rehash(hasher)?;
 
         Ok(board)
     }
@@ -70,13 +73,18 @@ impl Board {
 
     /// Plays a single stone.
     /// Returns next board state if the move was valid, Err if was invalid.
-    /// Panics when playing outside 16x16.
     pub fn play_stone(
         &self,
         pos: Position,
         color: Color,
         hasher: &ZobristHasher,
     ) -> Result<Board, MoveError> {
+        debug_assert_eq!(hasher.board_size(), Self::SIZE);
+
+        if pos.row >= Self::SIZE || pos.col >= Self::SIZE {
+            return Err(MoveError::NonEmptyPosition);
+        }
+
         let empty = self.empty_positions();
         let hash = self.hash ^ hasher.stone(pos, color);
         let current_move = Bitboard16::single(pos);
@@ -135,6 +143,8 @@ impl Board {
         // TODO: Perf: This could probably be made faster, somehow
         //  - PDEP for selecting bits within lane
         //  - Don't recalculate popcnt in every loop
+
+        debug_assert_eq!(hasher.board_size(), Self::SIZE);
 
         let mut candidates = self.empty_positions();
 
@@ -209,12 +219,21 @@ impl Board {
     /// Builds a bitboard from ascii representation, compatible with `Self::format_ascii`.
     /// Each line in text is a row in the bitboard, 'x' marks black, 'o' marks white,
     /// any other char marks an unset position.
-    /// Panics if any stone is outside the board ior the position has zero liberty groups.
     pub fn from_ascii(s: &str, hasher: &ZobristHasher) -> Result<Board, BoardInvariantError> {
+        debug_assert_eq!(hasher.board_size(), Self::SIZE);
+
         let mut stones: ColorMap<Bitboard16> = ColorMap::default();
 
         for (row, line) in s.lines().enumerate() {
             for (col, c) in line.chars().enumerate() {
+                if c != 'x' && c != 'o' {
+                    continue;
+                }
+
+                if row >= Board::SIZE || col >= Board::SIZE {
+                    return Err(BoardInvariantError::StoneOutsideBoard);
+                }
+
                 let pos = Position { row, col };
                 if c == 'x' {
                     stones[Color::Black].set(pos, true);
@@ -227,8 +246,11 @@ impl Board {
         Board::from_stones(stones, hasher)
     }
 
-    fn rehash(&self, hasher: &ZobristHasher) -> ZobristHash {
-        self.stones
+    fn rehash(&self, hasher: &ZobristHasher) -> Result<ZobristHash, BoardInvariantError> {
+        debug_assert_eq!(hasher.board_size(), Self::SIZE);
+
+        Ok(self
+            .stones
             .as_ref()
             .into_iter()
             .map(|(color, bitboard)| {
@@ -238,10 +260,11 @@ impl Board {
                     .fold(ZobristHash::default(), |a, b| a ^ b)
             })
             .reduce(|a, b| a ^ b)
-            .expect("ColorMap always has two elements")
+            .expect("ColorMap always has two elements"))
     }
 
-    fn check_invariants(&self, hasher: &ZobristHasher) -> Result<(), BoardInvariantError> {
+    /// Checks invariants of the board (as documented in class docstring), except hash correctness.
+    fn check_stone_invariants(&self) -> Result<(), BoardInvariantError> {
         if !(self.stones[Color::Black] & self.stones[Color::White]).is_empty() {
             return Err(BoardInvariantError::Overlap);
         }
@@ -257,7 +280,15 @@ impl Board {
             }
         }
 
-        if self.hash() != self.rehash(hasher) {
+        Ok(())
+    }
+
+    /// Checks invariants of the board (as documented in class docstring).
+    #[cfg(test)]
+    fn check_invariants(&self, hasher: &ZobristHasher) -> Result<(), BoardInvariantError> {
+        self.check_stone_invariants()?;
+
+        if self.hash() != self.rehash(hasher).unwrap() {
             return Err(BoardInvariantError::WrongHash);
         }
 
@@ -322,7 +353,7 @@ impl proptest::arbitrary::Arbitrary for BoardAndHasher {
 
 #[cfg(test)]
 mod test {
-    use proptest::property_test;
+    use proptest::{prop_oneof, property_test};
 
     use super::*;
 
@@ -348,6 +379,27 @@ mod test {
     #[property_test]
     fn arbitrary_board_is_valid(BoardAndHasher(board, hasher): BoardAndHasher) {
         board.check_invariants(&hasher).unwrap();
+    }
+
+    #[property_test]
+    fn from_stones_outside(
+        #[strategy = prop_oneof![
+                (Board::SIZE..16usize, 0usize..Board::SIZE),
+                (0usize..Board::SIZE, Board::SIZE..16usize),
+                (Board::SIZE..16usize, Board::SIZE..16usize)
+            ]]
+        coords: (usize, usize),
+        color: Color,
+    ) {
+        let pos = Position::new(coords.0, coords.1);
+        let hasher = ZobristHasher::new(Board::SIZE, &mut rand::rng());
+        assert_eq!(
+            Board::from_stones(
+                ColorMap::from_perspective(color, Bitboard16::single(pos), Bitboard16::new()),
+                &hasher
+            ),
+            Err(BoardInvariantError::StoneOutsideBoard)
+        );
     }
 
     mod play_stone {
@@ -386,6 +438,24 @@ mod test {
                 board
                     .play_stone(pos, color, &hasher)
                     .map(|board| transpose(board, &hasher))
+            );
+        }
+
+        #[property_test]
+        fn out_of_bounds(
+            BoardAndHasher(board, hasher): BoardAndHasher,
+            color: Color,
+            #[strategy = prop_oneof![
+                (Board::SIZE..256usize, 0usize..Board::SIZE),
+                (0usize..Board::SIZE, Board::SIZE..256usize),
+                (Board::SIZE..256usize, Board::SIZE..256usize)
+            ]]
+            coords: (usize, usize),
+        ) {
+            let pos = Position::new(coords.0, coords.1);
+            assert_eq!(
+                board.play_stone(pos, color, &hasher),
+                Err(MoveError::NonEmptyPosition)
             );
         }
 
@@ -875,6 +945,43 @@ mod test {
             let board = Board::from_ascii(&s, &hasher).unwrap();
 
             assert_eq!(board.stones[Color::Black], black_stones);
+        }
+
+        #[test]
+        fn empty_positions_outside_board() {
+            let hasher = ZobristHasher::new(Board::SIZE, &mut rand::rng());
+
+            assert!(
+                Board::from_ascii(
+                    "\n...x\n\n\n\n\n......................................................\n\
+                    \n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n",
+                    &hasher
+                )
+                .is_ok()
+            );
+        }
+
+        #[test]
+        fn too_long_row() {
+            let hasher = ZobristHasher::new(Board::SIZE, &mut rand::rng());
+
+            assert_eq!(
+                Board::from_ascii("\n..........................x", &hasher),
+                Err(BoardInvariantError::StoneOutsideBoard)
+            );
+        }
+
+        #[test]
+        fn too_many_rows() {
+            let hasher = ZobristHasher::new(Board::SIZE, &mut rand::rng());
+
+            assert_eq!(
+                Board::from_ascii(
+                    "\n...x\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\nx",
+                    &hasher
+                ),
+                Err(BoardInvariantError::StoneOutsideBoard)
+            );
         }
     }
 }
