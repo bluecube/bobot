@@ -94,7 +94,7 @@ impl Board {
         }
 
         let neighbors = current_move.dilate();
-        let (own, opponents) = self.stones.clone().to_perspective(color);
+        let (own, opponents) = self.stones.clone().into_perspective(color);
         let own = own | current_move;
         let empty = empty & !current_move;
 
@@ -206,7 +206,7 @@ impl Board {
                 .map_ref(|b| b.iter_rows())
                 .zip()
                 .map(ColorMap::zip),
-            |x| match x.to_array() {
+            |x| match x.into_array() {
                 [true, true] => unreachable!(),
                 [true, false] => Some('x'),
                 [false, true] => Some('o'),
@@ -859,7 +859,7 @@ mod test {
             .unwrap();
 
             assert_eq!(
-                board.score().to_perspective(color),
+                board.score().into_perspective(color),
                 (Board::SIZE * Board::SIZE, 0)
             );
         }

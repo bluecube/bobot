@@ -73,13 +73,13 @@ impl<T> ColorMap<T> {
     }
 
     /// Convert the colormap to raw array.
-    pub fn to_array(self) -> [T; 2] {
+    pub fn into_array(self) -> [T; 2] {
         self.values
     }
 
     /// Returns the content from perspective of given color.
     /// Complementary to `ColorMap::from_perspective`.
-    pub fn to_perspective(self, color: Color) -> (T, T) {
+    pub fn into_perspective(self, color: Color) -> (T, T) {
         let [b, w] = self.values;
         match color {
             Color::Black => (b, w),
@@ -122,7 +122,7 @@ impl<T> From<[T; 2]> for ColorMap<T> {
 
 impl<T> From<ColorMap<T>> for [T; 2] {
     fn from(value: ColorMap<T>) -> Self {
-        value.to_array()
+        value.into_array()
     }
 }
 
@@ -220,7 +220,7 @@ mod test {
         fn from_array_round_trip() {
             let array = [1, 2];
             let m = ColorMap::from(array);
-            assert_eq!(m.to_array(), array);
+            assert_eq!(m.into_array(), array);
         }
 
         #[test]
@@ -228,10 +228,10 @@ mod test {
             let mut colormap = ColorMap::from([1, 2]);
 
             colormap[Color::Black] = 3;
-            assert_eq!(colormap.clone().to_array(), [3, 2]);
+            assert_eq!(colormap.clone().into_array(), [3, 2]);
 
             colormap[Color::White] = 4;
-            assert_eq!(colormap.to_array(), [3, 4]);
+            assert_eq!(colormap.into_array(), [3, 4]);
         }
 
         #[test]
@@ -254,7 +254,7 @@ mod test {
         fn to_perspective_matches_color(c: Color) {
             let colormap = ColorMap::from([1, 2]);
             assert_eq!(
-                colormap.clone().to_perspective(c),
+                colormap.clone().into_perspective(c),
                 (colormap[c], colormap[!c])
             );
         }
@@ -270,7 +270,7 @@ mod test {
         #[property_test]
         fn perspective_roundtrip(c: Color) {
             assert_eq!(
-                ColorMap::from_perspective(c, 1, 2).to_perspective(c),
+                ColorMap::from_perspective(c, 1, 2).into_perspective(c),
                 (1, 2)
             );
         }
@@ -278,13 +278,13 @@ mod test {
         #[test]
         fn map() {
             let colormap = ColorMap::from([1, 2]);
-            assert_eq!(colormap.map(|x| 10 * x).to_array(), [10, 20]);
+            assert_eq!(colormap.map(|x| 10 * x).into_array(), [10, 20]);
         }
 
         #[test]
         fn map_ref() {
             let colormap = ColorMap::from([1, 2]);
-            assert_eq!(colormap.map_ref(|x| 10 * x).to_array(), [10, 20]);
+            assert_eq!(colormap.map_ref(|x| 10 * x).into_array(), [10, 20]);
         }
 
         #[test]
@@ -297,7 +297,7 @@ mod test {
                         counter += 1;
                         counter
                     })
-                    .to_array(),
+                    .into_array(),
                 [1, 2]
             );
         }
