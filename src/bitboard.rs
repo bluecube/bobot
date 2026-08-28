@@ -43,6 +43,9 @@ impl Default for Bitboard16 {
 }
 
 impl Bitboard16 {
+    /// Maximum coordinate value for positions in the bitboard.
+    pub const SIZE: usize = 16;
+
     /// Creates a bitboard with no positions set.
     pub fn new() -> Self {
         Bitboard16 {
@@ -70,16 +73,16 @@ impl Bitboard16 {
     /// Returns a value of a single bit. Slow.
     /// Panics on out of range index.
     pub fn get(&self, pos: Position) -> bool {
-        assert!(pos.row < 16);
-        assert!(pos.col < 16);
+        assert!(pos.row < Self::SIZE);
+        assert!(pos.col < Self::SIZE);
         (self.bits.as_array()[pos.row] >> pos.col) & 1 != 0
     }
 
     /// Sets a value of a single bit. Slow.
     /// Panics on out of range index.
     pub fn set(&mut self, pos: Position, value: bool) {
-        assert!(pos.row < 16);
-        assert!(pos.col < 16);
+        assert!(pos.row < Self::SIZE);
+        assert!(pos.col < Self::SIZE);
         let row = &mut self.bits.as_mut_array()[pos.row];
         if value {
             *row |= 1 << pos.col;
@@ -306,7 +309,7 @@ impl Bitboard16 {
 
     /// Shifts the content of the bitboard up (decreasing row indices of set bits).
     fn shift_up(&self, n: usize) -> Bitboard16 {
-        assert!(n < 16);
+        assert!(n < Self::SIZE);
         let input_array = self.bits.as_array();
 
         let output_array = array::from_fn(|i| {
@@ -324,7 +327,7 @@ impl Bitboard16 {
 
     /// Shifts the content of the bitboard down (increasing row indices of set bits).
     fn shift_down(&self, n: usize) -> Bitboard16 {
-        assert!(n < 16);
+        assert!(n < Self::SIZE);
         let input_array = self.bits.as_array();
 
         let output_array = array::from_fn(|i| if i >= n { input_array[i - n] } else { 0 });
@@ -444,7 +447,7 @@ impl Iterator for RowIterator {
     type Item = bool;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.pos < 16 {
+        if self.pos < Bitboard16::SIZE as u16 {
             let v = (self.bits >> self.pos) & 1 != 0;
             self.pos += 1;
             Some(v)
@@ -472,7 +475,7 @@ where
     RowsIterator::Item: IntoIterator,
     CellFn: FnMut(<RowsIterator::Item as IntoIterator>::Item) -> Option<char>,
 {
-    assert!(pad_to <= 16);
+    assert!(pad_to <= Bitboard16::SIZE);
 
     let mut result = String::with_capacity(pad_to * (pad_to + 1));
     let mut pending_rows = 0;
@@ -536,8 +539,8 @@ impl proptest::arbitrary::Arbitrary for Bitboard16 {
     fn arbitrary_with(size: Self::Parameters) -> Self::Strategy {
         use proptest::prelude::Strategy;
 
-        let size = size.unwrap_or(16);
-        assert!(size <= 16);
+        let size = size.unwrap_or(Self::SIZE);
+        assert!(size <= Self::SIZE);
 
         if size == 0 {
             return proptest::strategy::Just(Bitboard16::new()).boxed();
@@ -590,7 +593,7 @@ mod test {
 
     #[property_test]
     fn sized_bitboard_witin_mask(
-        #[strategy = (0usize..16usize)
+        #[strategy = (0usize..Bitboard16::SIZE)
             .prop_flat_map(|s| (Just(s), Bitboard16::arbitrary_with(Some(s))))
         ]
         (size, bitboard): (usize, Bitboard16),
@@ -607,8 +610,8 @@ mod test {
     fn new_has_no_bits_set() {
         let bb = Bitboard16::new();
 
-        for row in 0..16 {
-            for col in 0..16 {
+        for row in 0..Bitboard16::SIZE {
+            for col in 0..Bitboard16::SIZE {
                 assert!(!bb.get(Position::new(row, col)));
             }
         }
@@ -629,15 +632,15 @@ mod test {
 
     #[test]
     fn full_board_mask_negated_is_empty() {
-        assert!((!Bitboard16::board_mask(16)).is_empty())
+        assert!((!Bitboard16::board_mask(Bitboard16::SIZE)).is_empty())
     }
 
     #[property_test]
-    fn board_mask_bits(#[strategy = 0usize..=16usize] board_size: usize) {
+    fn board_mask_bits(#[strategy = 0usize..=Bitboard16::SIZE] board_size: usize) {
         let bb = Bitboard16::board_mask(board_size);
 
-        for row in 0usize..16usize {
-            for col in 0usize..16usize {
+        for row in 0usize..Bitboard16::SIZE {
+            for col in 0usize..Bitboard16::SIZE {
                 if (row < board_size) & (col < board_size) {
                     assert!(bb.get(Position::new(row, col)));
                 } else {
@@ -680,14 +683,14 @@ mod test {
         use super::*;
 
         #[property_test]
-        fn roundtrip(bb: Bitboard16, #[strategy = 0usize..=16usize] pad_to: usize) {
+        fn roundtrip(bb: Bitboard16, #[strategy = 0usize..=Bitboard16::SIZE] pad_to: usize) {
             let s = bb.format_ascii(pad_to);
 
             assert_eq!(Bitboard16::from_ascii(&s), bb);
         }
 
         #[property_test]
-        fn padding(bb: Bitboard16, #[strategy = 0usize..=16usize] pad_to: usize) {
+        fn padding(bb: Bitboard16, #[strategy = 0usize..=Bitboard16::SIZE] pad_to: usize) {
             let s = bb.format_ascii(pad_to);
 
             assert!(s.lines().count() >= pad_to);
@@ -788,7 +791,7 @@ mod test {
             #[test]
             fn checkerboard() {
                 let mut bb = Bitboard16::new();
-                for r in 0..16 {
+                for r in 0..Bitboard16::SIZE {
                     for i in 0..8 {
                         let c = 2 * i + r % 2;
 
@@ -813,12 +816,12 @@ mod test {
 
         #[property_test]
         fn row_count(bb: Bitboard16) {
-            assert_eq!(bb.iter_rows().count(), 16);
+            assert_eq!(bb.iter_rows().count(), Bitboard16::SIZE);
         }
 
         #[property_test]
         fn col_count(bb: Bitboard16) {
-            assert!(bb.iter_rows().all(|row| row.count() == 16));
+            assert!(bb.iter_rows().all(|row| row.count() == Bitboard16::SIZE));
         }
 
         #[property_test]
@@ -845,11 +848,11 @@ mod test {
                     let r = pos.row as isize + dr;
                     let c = pos.col as isize + dc;
 
-                    if !(0isize..16isize).contains(&r) {
+                    if !(0isize..(Bitboard16::SIZE as isize)).contains(&r) {
                         continue;
                     }
 
-                    if !(0isize..16isize).contains(&c) {
+                    if !(0isize..(Bitboard16::SIZE as isize)).contains(&c) {
                         continue;
                     }
 
@@ -860,22 +863,22 @@ mod test {
             }
 
             #[property_test]
-            fn left(bb: Bitboard16, #[strategy = 0usize..16usize] n: usize) {
+            fn left(bb: Bitboard16, #[strategy = 0usize..Bitboard16::SIZE] n: usize) {
                 assert_eq!(bb.shift_left(n), reference(bb, 0, -(n as isize)))
             }
 
             #[property_test]
-            fn right(bb: Bitboard16, #[strategy = 0usize..16usize] n: usize) {
+            fn right(bb: Bitboard16, #[strategy = 0usize..Bitboard16::SIZE] n: usize) {
                 assert_eq!(bb.shift_right(n), reference(bb, 0, n as isize))
             }
 
             #[property_test]
-            fn up(bb: Bitboard16, #[strategy = 0usize..16usize] n: usize) {
+            fn up(bb: Bitboard16, #[strategy = 0usize..Bitboard16::SIZE] n: usize) {
                 assert_eq!(bb.shift_up(n), reference(bb, -(n as isize), 0))
             }
 
             #[property_test]
-            fn down(bb: Bitboard16, #[strategy = 0usize..16usize] n: usize) {
+            fn down(bb: Bitboard16, #[strategy = 0usize..Bitboard16::SIZE] n: usize) {
                 assert_eq!(bb.shift_down(n), reference(bb, n as isize, 0))
             }
         }
@@ -924,12 +927,12 @@ mod test {
             use super::*;
 
             #[property_test]
-            fn left_up(bb: Bitboard16, #[strategy = 0usize..16usize] n: usize) {
+            fn left_up(bb: Bitboard16, #[strategy = 0usize..Bitboard16::SIZE] n: usize) {
                 assert_eq!(transpose(bb.shift_left(n)), transpose(bb).shift_up(n))
             }
 
             #[property_test]
-            fn right_down(bb: Bitboard16, #[strategy = 0usize..16usize] n: usize) {
+            fn right_down(bb: Bitboard16, #[strategy = 0usize..Bitboard16::SIZE] n: usize) {
                 assert_eq!(transpose(bb.shift_right(n)), transpose(bb).shift_down(n))
             }
         }
@@ -956,8 +959,8 @@ mod test {
 
         #[property_test]
         fn single_position_dilates_to_five(
-            #[strategy = 0usize..16usize] row: usize,
-            #[strategy = 0usize..16usize] col: usize,
+            #[strategy = 0usize..Bitboard16::SIZE] row: usize,
+            #[strategy = 0usize..Bitboard16::SIZE] col: usize,
         ) {
             let bb = Bitboard16::single(Position::new(row, col));
 
@@ -1167,7 +1170,7 @@ mod test {
 
             #[test]
             fn full() {
-                let mask = Bitboard16::board_mask(16);
+                let mask = Bitboard16::board_mask(Bitboard16::SIZE);
                 let seed = Bitboard16::single(Position::new(0, 0));
 
                 assert_eq!(seed.flood_fill(mask), mask);

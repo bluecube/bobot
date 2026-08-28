@@ -1,7 +1,7 @@
 use crate::{
     bitboard::{Bitboard16, Position, format_ascii_helper},
     color::{Color, ColorMap},
-    zobrist::{ZobristHash, ZobristHasher},
+    zobrist::ZobristHash,
 };
 use rand::RngExt as _;
 
@@ -46,16 +46,13 @@ impl Board {
 
     /// Constructs a new board from stone bitboards stored in a color map,
     /// calculates a correct hash.
-    pub fn from_stones(
-        stones: ColorMap<Bitboard16>,
-        hasher: &ZobristHasher,
-    ) -> Result<Board, BoardInvariantError> {
+    pub fn from_stones(stones: ColorMap<Bitboard16>) -> Result<Board, BoardInvariantError> {
         let mut board = Board {
             stones,
             hash: ZobristHash::default(),
         };
         board.check_stone_invariants()?;
-        board.hash = board.rehash(hasher)?;
+        board.hash = board.rehash();
 
         Ok(board)
     }
@@ -73,20 +70,13 @@ impl Board {
 
     /// Plays a single stone.
     /// Returns next board state if the move was valid, Err if was invalid.
-    pub fn play_stone(
-        &self,
-        pos: Position,
-        color: Color,
-        hasher: &ZobristHasher,
-    ) -> Result<Board, MoveError> {
-        debug_assert_eq!(hasher.board_size(), Self::SIZE);
-
+    pub fn play_stone(&self, pos: Position, color: Color) -> Result<Board, MoveError> {
         if pos.row >= Self::SIZE || pos.col >= Self::SIZE {
             return Err(MoveError::NonEmptyPosition);
         }
 
         let empty = self.empty_positions();
-        let hash = self.hash ^ hasher.stone(pos, color);
+        let hash = self.hash ^ ZobristHash::stone(pos, color);
         let current_move = Bitboard16::single(pos);
 
         if (current_move & empty).is_empty() {
@@ -104,7 +94,7 @@ impl Board {
             (opponents, empty, hash)
         } else {
             // Every live group neighbors with empty positions, flood filling from
-            // these selects all opponents live stones.
+            // these selects all opponent's live stones.
             let live = (opponents & empty.dilate()).flood_fill(opponents);
 
             let captured = opponents & !live;
@@ -112,7 +102,7 @@ impl Board {
             let opponents_color = !color;
             let hash = captured
                 .iter_positions()
-                .map(|pos| hasher.stone(pos, opponents_color))
+                .map(|pos| ZobristHash::stone(pos, opponents_color))
                 .fold(hash, |a, b| a ^ b);
 
             (live, empty | captured, hash)
@@ -134,24 +124,17 @@ impl Board {
         })
     }
 
-    pub fn play_random_legal_move(
-        &self,
-        color: Color,
-        hasher: &ZobristHasher,
-        rng: &mut impl rand::Rng,
-    ) -> Option<Board> {
+    pub fn play_random_legal_move(&self, color: Color, rng: &mut impl rand::Rng) -> Option<Board> {
         // TODO: Perf: This could probably be made faster, somehow
         //  - PDEP for selecting bits within lane
         //  - Don't recalculate popcnt in every loop
-
-        debug_assert_eq!(hasher.board_size(), Self::SIZE);
 
         let mut candidates = self.empty_positions();
 
         while !candidates.is_empty() {
             let i = rng.random_range(0..candidates.popcnt());
             let pos = candidates.iter_positions().nth(i).unwrap();
-            if let Ok(new_board) = self.play_stone(pos, color, hasher) {
+            if let Ok(new_board) = self.play_stone(pos, color) {
                 return Some(new_board);
             } else {
                 candidates.set(pos, false);
@@ -182,18 +165,10 @@ impl Board {
         score
     }
 
-    pub fn legal_moves(
-        &self,
-        color: Color,
-        hasher: &ZobristHasher,
-    ) -> impl Iterator<Item = (Position, Board)> {
+    pub fn legal_moves(&self, color: Color) -> impl Iterator<Item = (Position, Board)> {
         self.empty_positions()
             .iter_positions()
-            .filter_map(move |pos| {
-                self.play_stone(pos, color, hasher)
-                    .ok()
-                    .map(|board| (pos, board))
-            })
+            .filter_map(move |pos| self.play_stone(pos, color).ok().map(|board| (pos, board)))
     }
 
     /// Generates a viewable string represetnation of the board.
@@ -219,9 +194,7 @@ impl Board {
     /// Builds a bitboard from ascii representation, compatible with `Self::format_ascii`.
     /// Each line in text is a row in the bitboard, 'x' marks black, 'o' marks white,
     /// any other char marks an unset position.
-    pub fn from_ascii(s: &str, hasher: &ZobristHasher) -> Result<Board, BoardInvariantError> {
-        debug_assert_eq!(hasher.board_size(), Self::SIZE);
-
+    pub fn from_ascii(s: &str) -> Result<Board, BoardInvariantError> {
         let mut stones: ColorMap<Bitboard16> = ColorMap::default();
 
         for (row, line) in s.lines().enumerate() {
@@ -243,24 +216,21 @@ impl Board {
             }
         }
 
-        Board::from_stones(stones, hasher)
+        Board::from_stones(stones)
     }
 
-    fn rehash(&self, hasher: &ZobristHasher) -> Result<ZobristHash, BoardInvariantError> {
-        debug_assert_eq!(hasher.board_size(), Self::SIZE);
-
-        Ok(self
-            .stones
+    fn rehash(&self) -> ZobristHash {
+        self.stones
             .as_ref()
             .into_iter()
             .map(|(color, bitboard)| {
                 bitboard
                     .iter_positions()
-                    .map(|pos| hasher.stone(pos, color))
+                    .map(|pos| ZobristHash::stone(pos, color))
                     .fold(ZobristHash::default(), |a, b| a ^ b)
             })
             .reduce(|a, b| a ^ b)
-            .expect("ColorMap always has two elements"))
+            .expect("ColorMap always has two elements")
     }
 
     /// Checks invariants of the board (as documented in class docstring), except hash correctness.
@@ -285,10 +255,10 @@ impl Board {
 
     /// Checks invariants of the board (as documented in class docstring).
     #[cfg(test)]
-    fn check_invariants(&self, hasher: &ZobristHasher) -> Result<(), BoardInvariantError> {
+    fn check_invariants(&self) -> Result<(), BoardInvariantError> {
         self.check_stone_invariants()?;
 
-        if self.hash() != self.rehash(hasher).unwrap() {
+        if self.hash() != self.rehash() {
             return Err(BoardInvariantError::WrongHash);
         }
 
@@ -297,13 +267,9 @@ impl Board {
 }
 
 #[cfg(test)]
-#[derive(Debug)]
-pub struct BoardAndHasher(Board, ZobristHasher);
-
-#[cfg(test)]
-impl proptest::arbitrary::Arbitrary for BoardAndHasher {
+impl proptest::arbitrary::Arbitrary for Board {
     type Parameters = ();
-    type Strategy = proptest::strategy::BoxedStrategy<BoardAndHasher>;
+    type Strategy = proptest::strategy::BoxedStrategy<Board>;
 
     fn arbitrary_with(_: Self::Parameters) -> Self::Strategy {
         use proptest::{
@@ -312,22 +278,12 @@ impl proptest::arbitrary::Arbitrary for BoardAndHasher {
             strategy::{Just, Strategy},
         };
 
-        use crate::zobrist::zobrist_hasher_strategy;
-
-        (
-            zobrist_hasher_strategy(Just(Board::SIZE)),
-            Bitboard16::arbitrary_with(Some(Board::SIZE)),
-            0f64..=1f64,
-        )
-            .prop_flat_map(|(hasher, occupancy, white_ratio)| {
+        (Bitboard16::arbitrary_with(Some(Board::SIZE)), 0f64..=1f64)
+            .prop_flat_map(|(occupancy, white_ratio)| {
                 let count = occupancy.popcnt();
-                (
-                    Just(hasher),
-                    Just(occupancy),
-                    vec(weighted(white_ratio), count..=count),
-                )
+                (Just(occupancy), vec(weighted(white_ratio), count..=count))
             })
-            .prop_map(|(hasher, occupancy, white_vec)| {
+            .prop_map(|(occupancy, white_vec)| {
                 assert_eq!(occupancy.popcnt(), white_vec.len());
 
                 let white: Bitboard16 = occupancy
@@ -342,10 +298,7 @@ impl proptest::arbitrary::Arbitrary for BoardAndHasher {
                 let white = (white & empty.dilate()).flood_fill(white);
                 let black = (black & empty.dilate()).flood_fill(black);
 
-                BoardAndHasher(
-                    Board::from_stones([black, white].into(), &hasher).unwrap(),
-                    hasher,
-                )
+                Board::from_stones([black, white].into()).unwrap()
             })
             .boxed()
     }
@@ -357,47 +310,44 @@ mod test {
 
     use super::*;
 
-    fn transpose(board: Board, hasher: &ZobristHasher) -> Board {
-        Board::from_stones(
-            board.stones.map(|stones| {
-                stones
-                    .iter_positions()
-                    .map(|Position { row, col }| Position { row: col, col: row })
-                    .collect()
-            }),
-            hasher,
-        )
+    fn transpose(board: Board) -> Board {
+        Board::from_stones(board.stones.map(|stones| {
+            stones
+                .iter_positions()
+                .map(|Position { row, col }| Position { row: col, col: row })
+                .collect()
+        }))
         .unwrap()
     }
 
-    fn color_swap(board: Board, hasher: &ZobristHasher) -> Board {
+    fn color_swap(board: Board) -> Board {
         let [black, white] = board.stones.into();
-        Board::from_stones([white, black].into(), hasher).unwrap()
+        Board::from_stones([white, black].into()).unwrap()
     }
 
     /// Tests mostly the Arbitrary machinery, not actual production code
     #[property_test]
-    fn arbitrary_board_is_valid(BoardAndHasher(board, hasher): BoardAndHasher) {
-        board.check_invariants(&hasher).unwrap();
+    fn arbitrary_board_is_valid(board: Board) {
+        board.check_invariants().unwrap();
     }
 
     #[property_test]
     fn from_stones_outside(
         #[strategy = prop_oneof![
-                (Board::SIZE..16usize, 0usize..Board::SIZE),
-                (0usize..Board::SIZE, Board::SIZE..16usize),
-                (Board::SIZE..16usize, Board::SIZE..16usize)
+                (Board::SIZE..Bitboard16::SIZE, 0usize..Board::SIZE),
+                (0usize..Board::SIZE, Board::SIZE..Bitboard16::SIZE),
+                (Board::SIZE..Bitboard16::SIZE, Board::SIZE..Bitboard16::SIZE)
             ]]
         coords: (usize, usize),
         color: Color,
     ) {
         let pos = Position::new(coords.0, coords.1);
-        let hasher = ZobristHasher::new(Board::SIZE, &mut rand::rng());
         assert_eq!(
-            Board::from_stones(
-                ColorMap::from_perspective(color, Bitboard16::single(pos), Bitboard16::new()),
-                &hasher
-            ),
+            Board::from_stones(ColorMap::from_perspective(
+                color,
+                Bitboard16::single(pos),
+                Bitboard16::new()
+            ),),
             Err(BoardInvariantError::StoneOutsideBoard)
         );
     }
@@ -407,43 +357,35 @@ mod test {
 
         #[property_test]
         fn color_swap_produces_color_swapped_result(
-            BoardAndHasher(board, hasher): BoardAndHasher,
+            board: Board,
             #[strategy = 0usize..Board::SIZE] row: usize,
             #[strategy = 0usize..Board::SIZE] col: usize,
             color: Color,
         ) {
             let pos = Position { row, col };
             assert_eq!(
-                color_swap(board.clone(), &hasher).play_stone(pos, !color, &hasher),
-                board
-                    .play_stone(pos, color, &hasher)
-                    .map(|board| color_swap(board, &hasher))
+                color_swap(board.clone()).play_stone(pos, !color),
+                board.play_stone(pos, color).map(|board| color_swap(board))
             );
         }
 
         #[property_test]
         fn transpose_produces_transposed_result(
-            BoardAndHasher(board, hasher): BoardAndHasher,
+            board: Board,
             #[strategy = 0usize..Board::SIZE] row: usize,
             #[strategy = 0usize..Board::SIZE] col: usize,
             color: Color,
         ) {
             let pos = Position { row, col };
             assert_eq!(
-                transpose(board.clone(), &hasher).play_stone(
-                    Position::new(pos.col, pos.row),
-                    color,
-                    &hasher
-                ),
-                board
-                    .play_stone(pos, color, &hasher)
-                    .map(|board| transpose(board, &hasher))
+                transpose(board.clone()).play_stone(Position::new(pos.col, pos.row), color,),
+                board.play_stone(pos, color).map(|board| transpose(board))
             );
         }
 
         #[property_test]
         fn out_of_bounds(
-            BoardAndHasher(board, hasher): BoardAndHasher,
+            board: Board,
             color: Color,
             #[strategy = prop_oneof![
                 (Board::SIZE..256usize, 0usize..Board::SIZE),
@@ -454,7 +396,7 @@ mod test {
         ) {
             let pos = Position::new(coords.0, coords.1);
             assert_eq!(
-                board.play_stone(pos, color, &hasher),
+                board.play_stone(pos, color),
                 Err(MoveError::NonEmptyPosition)
             );
         }
@@ -463,11 +405,11 @@ mod test {
             use super::*;
 
             #[derive(Debug)]
-            pub struct BoardHasherAndLegalMove(Board, ZobristHasher, Position, Color);
+            pub struct BoardAndLegalMove(Board, Position, Color);
 
-            impl proptest::arbitrary::Arbitrary for BoardHasherAndLegalMove {
+            impl proptest::arbitrary::Arbitrary for BoardAndLegalMove {
                 type Parameters = ();
-                type Strategy = proptest::strategy::BoxedStrategy<BoardHasherAndLegalMove>;
+                type Strategy = proptest::strategy::BoxedStrategy<BoardAndLegalMove>;
 
                 fn arbitrary_with(_: Self::Parameters) -> Self::Strategy {
                     use proptest::{
@@ -475,62 +417,49 @@ mod test {
                         strategy::{Just, Strategy},
                     };
 
-                    BoardAndHasher::arbitrary()
-                        .prop_filter_map(
-                            "some move must be available",
-                            |BoardAndHasher(board, hasher)| {
-                                let legal_moves: Vec<_> = [Color::Black, Color::White]
-                                    .into_iter()
-                                    .flat_map(|color| {
-                                        board
-                                            .legal_moves(color, &hasher)
-                                            .map(move |(pos, _board)| (pos, color))
-                                    })
-                                    .collect();
-                                if legal_moves.is_empty() {
-                                    None
-                                } else {
-                                    Some((board, hasher, legal_moves))
-                                }
-                            },
-                        )
-                        .prop_flat_map(|(board, hasher, legal_moves)| {
-                            (Just(board), Just(hasher), select(legal_moves))
+                    Board::arbitrary()
+                        .prop_filter_map("some move must be available", |board| {
+                            let legal_moves: Vec<_> = [Color::Black, Color::White]
+                                .into_iter()
+                                .flat_map(|color| {
+                                    board
+                                        .legal_moves(color)
+                                        .map(move |(pos, _board)| (pos, color))
+                                })
+                                .collect();
+                            if legal_moves.is_empty() {
+                                None
+                            } else {
+                                Some((board, legal_moves))
+                            }
                         })
-                        .prop_map(|(board, hasher, (pos, color))| {
-                            BoardHasherAndLegalMove(board, hasher, pos, color)
-                        })
+                        .prop_flat_map(|(board, legal_moves)| (Just(board), select(legal_moves)))
+                        .prop_map(|(board, (pos, color))| BoardAndLegalMove(board, pos, color))
                         .boxed()
                 }
             }
 
             #[property_test]
-            fn keeps_invariants(
-                BoardHasherAndLegalMove(board, hasher, pos, color): BoardHasherAndLegalMove,
-            ) {
+            fn keeps_invariants(BoardAndLegalMove(board, pos, color): BoardAndLegalMove) {
                 board
-                    .play_stone(pos, color, &hasher)
+                    .play_stone(pos, color)
                     .unwrap()
-                    .check_invariants(&hasher)
+                    .check_invariants()
                     .unwrap();
             }
 
             #[property_test]
-            fn adds_the_played_stone(
-                BoardHasherAndLegalMove(board, hasher, pos, color): BoardHasherAndLegalMove,
-            ) {
+            fn adds_the_played_stone(BoardAndLegalMove(board, pos, color): BoardAndLegalMove) {
                 assert_eq!(
-                    board.play_stone(pos, color, &hasher).unwrap().stones[color],
+                    board.play_stone(pos, color).unwrap().stones[color],
                     board.stones[color] | Bitboard16::single(pos)
                 );
             }
 
             #[property_test]
-            fn does_not_add_enemy_stones(
-                BoardHasherAndLegalMove(board, hasher, pos, color): BoardHasherAndLegalMove,
-            ) {
+            fn does_not_add_enemy_stones(BoardAndLegalMove(board, pos, color): BoardAndLegalMove) {
                 let opponents_stones = board.stones[!color];
-                let board_after = board.play_stone(pos, color, &hasher).unwrap();
+                let board_after = board.play_stone(pos, color).unwrap();
                 let opponents_stones_after = board_after.stones[!color];
 
                 assert!((opponents_stones_after & !opponents_stones).is_empty());
@@ -538,11 +467,11 @@ mod test {
 
             #[property_test]
             fn captured_groups_only_liberty_was_the_move(
-                BoardHasherAndLegalMove(board, hasher, pos, color): BoardHasherAndLegalMove,
+                BoardAndLegalMove(board, pos, color): BoardAndLegalMove,
             ) {
                 let move_bitmask = Bitboard16::single(pos);
                 let opponents_stones = board.stones[!color];
-                let board_after = board.play_stone(pos, color, &hasher).unwrap();
+                let board_after = board.play_stone(pos, color).unwrap();
 
                 let captured_stones = opponents_stones & !board_after.stones[!color];
 
@@ -557,130 +486,112 @@ mod test {
 
             #[test]
             fn empty_board() {
-                let hasher = ZobristHasher::new(Board::SIZE, &mut rand::rng());
                 let board = Board::new();
 
                 assert_eq!(
-                    board.play_stone(Position::new(0, 0), Color::Black, &hasher),
-                    Ok(Board::from_ascii("x", &hasher).unwrap())
+                    board.play_stone(Position::new(0, 0), Color::Black),
+                    Ok(Board::from_ascii("x").unwrap())
                 );
             }
 
             #[test]
             fn next_to_opponent_no_capture() {
-                let hasher = ZobristHasher::new(Board::SIZE, &mut rand::rng());
-                let board = Board::from_ascii("o", &hasher).unwrap();
+                let board = Board::from_ascii("o").unwrap();
 
                 assert_eq!(
-                    board.play_stone(Position::new(1, 0), Color::Black, &hasher),
-                    Ok(Board::from_ascii("o\nx", &hasher).unwrap())
+                    board.play_stone(Position::new(1, 0), Color::Black),
+                    Ok(Board::from_ascii("o\nx").unwrap())
                 );
             }
 
             #[test]
             fn corner_capture() {
-                let hasher = ZobristHasher::new(Board::SIZE, &mut rand::rng());
-                let board = Board::from_ascii("ox", &hasher).unwrap();
+                let board = Board::from_ascii("ox").unwrap();
 
                 assert_eq!(
-                    board.play_stone(Position::new(1, 0), Color::Black, &hasher),
-                    Ok(Board::from_ascii(".x\nx", &hasher).unwrap())
+                    board.play_stone(Position::new(1, 0), Color::Black),
+                    Ok(Board::from_ascii(".x\nx").unwrap())
                 );
             }
 
             #[test]
             fn corner_capture2() {
-                let hasher = ZobristHasher::new(Board::SIZE, &mut rand::rng());
-                let board =
-                    Board::from_ascii("\n\n\n\n\n\n\n\n\n\n\n\n...........xo", &hasher).unwrap();
+                let board = Board::from_ascii("\n\n\n\n\n\n\n\n\n\n\n\n...........xo").unwrap();
 
                 assert_eq!(
-                    board.play_stone(Position::new(11, 12), Color::Black, &hasher),
-                    Ok(Board::from_ascii(
-                        "\n\n\n\n\n\n\n\n\n\n\n............x\n...........x.",
-                        &hasher
-                    )
-                    .unwrap())
-                );
-            }
-
-            #[test]
-            fn playing_nonempty_position() {
-                let hasher = ZobristHasher::new(Board::SIZE, &mut rand::rng());
-                let board = Board::from_ascii("x", &hasher).unwrap();
-
-                assert_eq!(
-                    board.play_stone(Position::new(0, 0), Color::Black, &hasher),
-                    Err(MoveError::NonEmptyPosition)
-                );
-            }
-
-            #[test]
-            fn suicide() {
-                let hasher = ZobristHasher::new(Board::SIZE, &mut rand::rng());
-                let board =
-                    Board::from_ascii(".ooooo\noxxxxo\noxx.xo\noxxxxo\noooooo", &hasher).unwrap();
-                assert_eq!(
-                    board.play_stone(Position::new(2, 3), Color::Black, &hasher),
-                    Err(MoveError::Suicide)
-                );
-            }
-
-            #[test]
-            fn not_suicide() {
-                let hasher = ZobristHasher::new(Board::SIZE, &mut rand::rng());
-                let board =
-                    Board::from_ascii(".ooooo\noxxxxo\noxx.xo\noxxxxo\nooo.oo", &hasher).unwrap();
-                assert_eq!(
-                    board.play_stone(Position::new(2, 3), Color::Black, &hasher),
+                    board.play_stone(Position::new(11, 12), Color::Black),
                     Ok(
-                        Board::from_ascii(".ooooo\noxxxxo\noxxxxo\noxxxxo\nooo.oo", &hasher)
+                        Board::from_ascii("\n\n\n\n\n\n\n\n\n\n\n............x\n...........x.",)
                             .unwrap()
                     )
                 );
             }
 
             #[test]
-            fn liberty_from_captured_stone() {
-                let hasher = ZobristHasher::new(Board::SIZE, &mut rand::rng());
-                let board = Board::from_ascii("oxo\n.xo\nooo", &hasher).unwrap();
+            fn playing_nonempty_position() {
+                let board = Board::from_ascii("x").unwrap();
 
                 assert_eq!(
-                    board.play_stone(Position::new(1, 0), Color::Black, &hasher),
-                    Ok(Board::from_ascii(".xo\nxxo\nooo", &hasher).unwrap())
+                    board.play_stone(Position::new(0, 0), Color::Black),
+                    Err(MoveError::NonEmptyPosition)
+                );
+            }
+
+            #[test]
+            fn suicide() {
+                let board = Board::from_ascii(".ooooo\noxxxxo\noxx.xo\noxxxxo\noooooo").unwrap();
+                assert_eq!(
+                    board.play_stone(Position::new(2, 3), Color::Black),
+                    Err(MoveError::Suicide)
+                );
+            }
+
+            #[test]
+            fn not_suicide() {
+                let board = Board::from_ascii(".ooooo\noxxxxo\noxx.xo\noxxxxo\nooo.oo").unwrap();
+                assert_eq!(
+                    board.play_stone(Position::new(2, 3), Color::Black),
+                    Ok(Board::from_ascii(".ooooo\noxxxxo\noxxxxo\noxxxxo\nooo.oo").unwrap())
+                );
+            }
+
+            #[test]
+            fn liberty_from_captured_stone() {
+                let board = Board::from_ascii("oxo\n.xo\nooo").unwrap();
+
+                assert_eq!(
+                    board.play_stone(Position::new(1, 0), Color::Black),
+                    Ok(Board::from_ascii(".xo\nxxo\nooo").unwrap())
                 );
             }
 
             #[test]
             fn capture_multiple() {
-                let hasher = ZobristHasher::new(Board::SIZE, &mut rand::rng());
-                let board = Board::from_ascii("oo.oox\nxxxxxx", &hasher).unwrap();
+                let board = Board::from_ascii("oo.oox\nxxxxxx").unwrap();
 
                 assert_eq!(
-                    board.play_stone(Position::new(0, 2), Color::Black, &hasher),
-                    Ok(Board::from_ascii("..x..x\nxxxxxx", &hasher).unwrap())
+                    board.play_stone(Position::new(0, 2), Color::Black),
+                    Ok(Board::from_ascii("..x..x\nxxxxxx").unwrap())
                 );
             }
 
             #[test]
             fn capture_multiple_liberty_from_captured() {
-                let hasher = ZobristHasher::new(Board::SIZE, &mut rand::rng());
-                let board = Board::from_ascii("oo.oox\nxxoxxx", &hasher).unwrap();
+                let board = Board::from_ascii("oo.oox\nxxoxxx").unwrap();
 
                 assert_eq!(
-                    board.play_stone(Position::new(0, 2), Color::Black, &hasher),
-                    Ok(Board::from_ascii("..x..x\nxxoxxx", &hasher).unwrap())
+                    board.play_stone(Position::new(0, 2), Color::Black),
+                    Ok(Board::from_ascii("..x..x\nxxoxxx").unwrap())
                 );
             }
 
             #[test]
             fn capture_one_of_two_groups() {
-                let hasher = ZobristHasher::new(Board::SIZE, &mut rand::rng());
-                let board = Board::from_ascii("oo.oo\nxxxxxx", &hasher).unwrap();
+                let board = Board::from_ascii("oo.oo\nxxxxxx").unwrap();
 
                 assert_eq!(
-                    board.play_stone(Position::new(0, 2), Color::Black, &hasher),
-                    Ok(Board::from_ascii("..xoo\nxxxxxx", &hasher).unwrap())
+                    board.play_stone(Position::new(0, 2), Color::Black),
+                    Ok(Board::from_ascii("..xoo\nxxxxxx").unwrap())
                 );
             }
         }
@@ -692,18 +603,16 @@ mod test {
         use super::*;
 
         #[property_test]
-        fn are_legal_and_boards_match(BoardAndHasher(board, hasher): BoardAndHasher, color: Color) {
-            for (pos, expected_result) in board.legal_moves(color, &hasher) {
-                assert_eq!(board.play_stone(pos, color, &hasher), Ok(expected_result));
+        fn are_legal_and_boards_match(board: Board, color: Color) {
+            for (pos, expected_result) in board.legal_moves(color) {
+                assert_eq!(board.play_stone(pos, color), Ok(expected_result));
             }
         }
 
         #[property_test]
-        fn no_other_moves_are_legal(BoardAndHasher(board, hasher): BoardAndHasher, color: Color) {
-            let legal_moves: HashSet<_> = board
-                .legal_moves(color, &hasher)
-                .map(|(pos, _board)| pos)
-                .collect();
+        fn no_other_moves_are_legal(board: Board, color: Color) {
+            let legal_moves: HashSet<_> =
+                board.legal_moves(color).map(|(pos, _board)| pos).collect();
 
             for row in 0..Board::SIZE {
                 for col in 0..Board::SIZE {
@@ -713,14 +622,14 @@ mod test {
                         continue;
                     }
 
-                    assert!(board.play_stone(pos, color, &hasher).is_err());
+                    assert!(board.play_stone(pos, color).is_err());
                 }
             }
         }
 
         #[property_test]
         fn move_errors(
-            BoardAndHasher(board, hasher): BoardAndHasher,
+            board: Board,
             #[strategy = 0usize..Board::SIZE] row: usize,
             #[strategy = 0usize..Board::SIZE] col: usize,
             color: Color,
@@ -729,7 +638,7 @@ mod test {
             let move_mask = Bitboard16::single(pos);
             let empty = board.empty_positions();
 
-            match board.play_stone(pos, color, &hasher) {
+            match board.play_stone(pos, color) {
                 Ok(_) => assert!(empty.get(pos)),
                 Err(MoveError::NonEmptyPosition) => {
                     assert!(!empty.get(pos))
@@ -747,7 +656,6 @@ mod test {
 
             #[test]
             fn full_board_one_move() {
-                let hasher = ZobristHasher::new(Board::SIZE, &mut rand::rng());
                 let board = Board::from_ascii(
                     "xxxxxxxxxxxxx\n\
                      xxxxxxxxxxxxx\n\
@@ -762,16 +670,15 @@ mod test {
                      ooooooooooooo\n\
                      ooooooooooooo\n\
                      ooooooooooooo",
-                    &hasher,
                 )
                 .unwrap();
 
                 let black_legal_moves: Vec<_> = board
-                    .legal_moves(Color::Black, &hasher)
+                    .legal_moves(Color::Black)
                     .map(|(pos, _board)| pos)
                     .collect();
                 let white_legal_moves: Vec<_> = board
-                    .legal_moves(Color::White, &hasher)
+                    .legal_moves(Color::White)
                     .map(|(pos, _board)| pos)
                     .collect();
 
@@ -781,7 +688,6 @@ mod test {
 
             #[test]
             fn full_board_no_moves_for_black() {
-                let hasher = ZobristHasher::new(Board::SIZE, &mut rand::rng());
                 let board = Board::from_ascii(
                     "xxxxxxxxxxxxx\n\
                      xxxxxxxxxxxxx\n\
@@ -796,20 +702,17 @@ mod test {
                      xxxxxxxxxxxxx\n\
                      xxxxxxxxxxxxx\n\
                      xxxxxxxxxxxxx",
-                    &hasher,
                 )
                 .unwrap();
 
-                assert_eq!(board.legal_moves(Color::Black, &hasher).count(), 0);
-                assert_eq!(board.legal_moves(Color::White, &hasher).count(), 1);
+                assert_eq!(board.legal_moves(Color::Black).count(), 0);
+                assert_eq!(board.legal_moves(Color::White).count(), 1);
             }
         }
     }
 
     mod score {
         use proptest::prop_assume;
-
-        use crate::zobrist::zobrist_hasher_strategy;
 
         use super::*;
 
@@ -819,44 +722,41 @@ mod test {
         }
 
         #[property_test]
-        fn stone_count(BoardAndHasher(board, _hasher): BoardAndHasher) {
+        fn stone_count(board: Board) {
             for (color, score) in board.score() {
                 assert!(score >= board.stones[color].popcnt());
             }
         }
 
         #[property_test]
-        fn limited_by_board_size(BoardAndHasher(board, _hasher): BoardAndHasher) {
+        fn limited_by_board_size(board: Board) {
             let [black, white] = board.score().into();
             assert!(black + white <= Board::SIZE * Board::SIZE);
         }
 
         #[property_test]
-        fn color_swap_swaps(BoardAndHasher(board, hasher): BoardAndHasher) {
+        fn color_swap_swaps(board: Board) {
             let [black, white] = board.score().into();
-            let swapped_board = color_swap(board, &hasher);
+            let swapped_board = color_swap(board);
             assert_eq!(swapped_board.score(), [white, black].into());
         }
 
         #[property_test]
-        fn transpose_no_change(BoardAndHasher(board, hasher): BoardAndHasher) {
-            assert_eq!(board.score(), transpose(board, &hasher).score());
+        fn transpose_no_change(board: Board) {
+            assert_eq!(board.score(), transpose(board).score());
         }
 
         #[property_test]
         fn single_color_board(
             #[strategy = Bitboard16::arbitrary_with(Some(Board::SIZE))] stones: Bitboard16,
             color: Color,
-            #[strategy = zobrist_hasher_strategy(Board::SIZE..=Board::SIZE)] hasher: ZobristHasher,
         ) {
             prop_assume!(!stones.is_empty());
             prop_assume!(stones != Bitboard16::board_mask(Board::SIZE));
 
-            let board = Board::from_stones(
-                ColorMap::from_perspective(color, stones, Bitboard16::new()),
-                &hasher,
-            )
-            .unwrap();
+            let board =
+                Board::from_stones(ColorMap::from_perspective(color, stones, Bitboard16::new()))
+                    .unwrap();
 
             assert_eq!(
                 board.score().into_perspective(color),
@@ -866,9 +766,7 @@ mod test {
 
         #[test]
         fn example() {
-            let hasher = ZobristHasher::new(Board::SIZE, &mut rand::rng());
-            let board =
-                Board::from_ascii("\n\n\nxxxxxxxxxxxxx\n\n\n\nooooooooooooo", &hasher).unwrap();
+            let board = Board::from_ascii("\n\n\nxxxxxxxxxxxxx\n\n\n\nooooooooooooo").unwrap();
 
             assert_eq!(board.score(), [4 * 13, 6 * 13].into());
         }
@@ -880,29 +778,19 @@ mod test {
         use super::*;
 
         #[property_test]
-        fn some_if_legal_moves_exist(
-            BoardAndHasher(board, hasher): BoardAndHasher,
-            color: Color,
-            seed: u64,
-        ) {
+        fn some_if_legal_moves_exist(board: Board, color: Color, seed: u64) {
             let mut rng = rand::rngs::SmallRng::seed_from_u64(seed);
             assert_eq!(
-                board
-                    .play_random_legal_move(color, &hasher, &mut rng)
-                    .is_some(),
-                board.legal_moves(color, &hasher).count() > 0
+                board.play_random_legal_move(color, &mut rng).is_some(),
+                board.legal_moves(color).count() > 0
             );
         }
 
         #[property_test]
-        fn all_legal_moves_appear(
-            BoardAndHasher(board, hasher): BoardAndHasher,
-            color: Color,
-            seed: u64,
-        ) {
+        fn all_legal_moves_appear(board: Board, color: Color, seed: u64) {
             let mut rng = rand::rngs::SmallRng::seed_from_u64(seed);
             let mut remaining_moves: Vec<_> = board
-                .legal_moves(color, &hasher)
+                .legal_moves(color)
                 .map(|(_pos, board)| board)
                 .collect();
             let number_of_tries = remaining_moves.len() * 100;
@@ -912,9 +800,7 @@ mod test {
                     break;
                 }
 
-                let random_board = board
-                    .play_random_legal_move(color, &hasher, &mut rng)
-                    .unwrap();
+                let random_board = board.play_random_legal_move(color, &mut rng).unwrap();
 
                 if let Some(index) = remaining_moves.iter().position(|b| b == &random_board) {
                     remaining_moves.swap_remove(index);
@@ -929,33 +815,31 @@ mod test {
         use super::*;
 
         #[property_test]
-        fn round_trip(BoardAndHasher(board, hasher): BoardAndHasher, compact: bool) {
+        fn round_trip(board: Board, compact: bool) {
             let s = board.format_ascii(compact);
-            let unpacked = Board::from_ascii(&s, &hasher).unwrap();
+            let unpacked = Board::from_ascii(&s).unwrap();
 
             assert_eq!(unpacked, board);
         }
 
         #[property_test]
-        fn bitboard_as_board(BoardAndHasher(board, hasher): BoardAndHasher) {
+        fn bitboard_as_board(board: Board) {
             // Bitboard doesn't need to respect Board invariants, so we have to start with a Board.
             let black_stones = board.stones[Color::Black];
             let s = black_stones.format_ascii(0);
 
-            let board = Board::from_ascii(&s, &hasher).unwrap();
+            let board = Board::from_ascii(&s).unwrap();
 
             assert_eq!(board.stones[Color::Black], black_stones);
         }
 
         #[test]
         fn empty_positions_outside_board() {
-            let hasher = ZobristHasher::new(Board::SIZE, &mut rand::rng());
-
             assert!(
                 Board::from_ascii(
-                    "\n...x\n\n\n\n\n......................................................\n\
-                    \n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n",
-                    &hasher
+                    "\n...x\n\n\n\n\n\
+                    .....................................................\n\
+                    \n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n"
                 )
                 .is_ok()
             );
@@ -963,23 +847,16 @@ mod test {
 
         #[test]
         fn too_long_row() {
-            let hasher = ZobristHasher::new(Board::SIZE, &mut rand::rng());
-
             assert_eq!(
-                Board::from_ascii("\n..........................x", &hasher),
+                Board::from_ascii("\n..........................x"),
                 Err(BoardInvariantError::StoneOutsideBoard)
             );
         }
 
         #[test]
         fn too_many_rows() {
-            let hasher = ZobristHasher::new(Board::SIZE, &mut rand::rng());
-
             assert_eq!(
-                Board::from_ascii(
-                    "\n...x\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\nx",
-                    &hasher
-                ),
+                Board::from_ascii("\n...x\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\nx"),
                 Err(BoardInvariantError::StoneOutsideBoard)
             );
         }

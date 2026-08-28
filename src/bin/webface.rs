@@ -7,7 +7,7 @@ use axum::{
     response::{Html, IntoResponse, Json, Redirect},
     routing::{get, post},
 };
-use bobot::{Bitboard16, Board, Color, Position, ZobristHasher};
+use bobot::{Bitboard16, Board, Color, Position};
 use dashmap::DashMap;
 use serde::{Deserialize, Serialize};
 
@@ -15,7 +15,6 @@ type GameId = u128;
 
 struct AppState {
     games: DashMap<GameId, Game>,
-    hasher: ZobristHasher,
 }
 
 #[derive(Clone, Default)]
@@ -24,12 +23,12 @@ struct Game {
 }
 
 impl Game {
-    fn make_response(&self, hasher: &ZobristHasher) -> GameStateResponse {
+    fn make_response(&self) -> GameStateResponse {
         GameStateResponse {
             board: self.board.format_ascii(true),
             legal_moves: (!Bitboard16::from_iter(
                 self.board
-                    .legal_moves(Color::Black, hasher)
+                    .legal_moves(Color::Black)
                     .map(|(pos, _board)| pos),
             ))
             .format_ascii(0),
@@ -59,7 +58,6 @@ async fn main() {
         .route("/games/{game_id}/move", post(play_move))
         .with_state(Arc::new(AppState {
             games: DashMap::default(),
-            hasher: ZobristHasher::new(Board::SIZE, &mut rand::rng()),
         }));
 
     // run it
@@ -100,7 +98,7 @@ async fn game_state(
 ) -> Result<Json<GameStateResponse>, StatusCode> {
     let game = app.games.get(&game_id).ok_or(StatusCode::NOT_FOUND)?;
 
-    Ok(Json(game.make_response(&app.hasher)))
+    Ok(Json(game.make_response()))
 }
 
 #[axum::debug_handler]
@@ -113,15 +111,15 @@ async fn play_move(
 
     game.board = game
         .board
-        .play_stone(next_move.position, Color::Black, &app.hasher)
+        .play_stone(next_move.position, Color::Black)
         .map_err(|_| StatusCode::CONFLICT)?;
 
-    if let Some(board) =
-        game.board
-            .play_random_legal_move(Color::White, &app.hasher, &mut rand::rng())
+    if let Some(board) = game
+        .board
+        .play_random_legal_move(Color::White, &mut rand::rng())
     {
         game.board = board;
     }
 
-    Ok(Json(game.make_response(&app.hasher)))
+    Ok(Json(game.make_response()))
 }
