@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{ops::Deref, sync::Arc};
 
 use axum::{
     Router,
@@ -7,33 +7,14 @@ use axum::{
     response::{Html, IntoResponse, Json, Redirect},
     routing::{get, post},
 };
-use bobot::{Bitboard16, Board, Color, Position};
+use bobot::{Bitboard16, Color, GameState, Move};
 use dashmap::DashMap;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 
 type GameId = u128;
 
 struct AppState {
-    games: DashMap<GameId, Game>,
-}
-
-#[derive(Clone, Default)]
-struct Game {
-    board: Board,
-}
-
-impl Game {
-    fn make_response(&self) -> GameStateResponse {
-        GameStateResponse {
-            board: self.board.format_ascii(true),
-            legal_moves: (!Bitboard16::from_iter(
-                self.board
-                    .legal_moves(Color::Black)
-                    .map(|(pos, _board)| pos),
-            ))
-            .format_ascii(0),
-        }
-    }
+    games: DashMap<GameId, GameState>,
 }
 
 #[derive(Serialize)]
@@ -42,9 +23,19 @@ struct GameStateResponse {
     legal_moves: String,
 }
 
-#[derive(Deserialize)]
-struct PlayMove {
-    position: Position,
+impl From<&GameState> for GameStateResponse {
+    fn from(value: &GameState) -> Self {
+        GameStateResponse {
+            board: value.board.format_ascii(true),
+            legal_moves: (!Bitboard16::from_iter(
+                value
+                    .board
+                    .legal_moves(Color::Black)
+                    .map(|(pos, _board)| pos),
+            ))
+            .format_ascii(0),
+        }
+    }
 }
 
 #[tokio::main]
@@ -86,7 +77,7 @@ async fn board_js() -> impl IntoResponse {
 #[axum::debug_handler]
 async fn new_game(State(app): State<Arc<AppState>>) -> Redirect {
     let game_id = rand::random();
-    app.games.insert(game_id, Game::default());
+    app.games.insert(game_id, GameState::new());
 
     Redirect::to(&format!("/games/{game_id}"))
 }
@@ -98,28 +89,22 @@ async fn game_state(
 ) -> Result<Json<GameStateResponse>, StatusCode> {
     let game = app.games.get(&game_id).ok_or(StatusCode::NOT_FOUND)?;
 
-    Ok(Json(game.make_response()))
+    Ok(Json(GameStateResponse::from(game.deref())))
 }
 
 #[axum::debug_handler]
 async fn play_move(
     State(app): State<Arc<AppState>>,
     Path(game_id): Path<GameId>,
-    Json(next_move): Json<PlayMove>,
+    Json(next_move): Json<Move>,
 ) -> Result<Json<GameStateResponse>, StatusCode> {
     let mut game = app.games.get_mut(&game_id).ok_or(StatusCode::NOT_FOUND)?;
 
-    game.board = game
-        .board
-        .play_stone(next_move.position, Color::Black)
+    game.play_move(next_move)
         .map_err(|_| StatusCode::CONFLICT)?;
 
-    if let Some(board) = game
-        .board
-        .play_random_legal_move(Color::White, &mut rand::rng())
-    {
-        game.board = board;
-    }
+    game.play_random_legal_move(&mut rand::rng())
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-    Ok(Json(game.make_response()))
+    Ok(Json(GameStateResponse::from(game.deref())))
 }

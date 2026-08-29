@@ -6,10 +6,9 @@ use crate::{
 use rand::RngExt as _;
 
 #[derive(Debug, PartialEq, Eq)]
-pub enum MoveError {
+pub enum PlayStoneError {
     NonEmptyPosition,
     Suicide,
-    Ko,
 }
 
 /// Describes potential problems with board. Mostly debug-only.
@@ -70,9 +69,9 @@ impl Board {
 
     /// Plays a single stone.
     /// Returns next board state if the move was valid, Err if was invalid.
-    pub fn play_stone(&self, pos: Position, color: Color) -> Result<Board, MoveError> {
+    pub fn play_stone(&self, pos: Position, color: Color) -> Result<Board, PlayStoneError> {
         if pos.row >= Self::SIZE || pos.col >= Self::SIZE {
-            return Err(MoveError::NonEmptyPosition);
+            return Err(PlayStoneError::NonEmptyPosition);
         }
 
         let empty = self.empty_positions();
@@ -80,7 +79,7 @@ impl Board {
         let current_move = Bitboard16::single(pos);
 
         if (current_move & empty).is_empty() {
-            return Err(MoveError::NonEmptyPosition);
+            return Err(PlayStoneError::NonEmptyPosition);
         }
 
         let neighbors = current_move.dilate();
@@ -114,7 +113,7 @@ impl Board {
 
             let group = current_move.flood_fill(own);
             if (group.dilate() & empty).is_empty() {
-                return Err(MoveError::Suicide);
+                return Err(PlayStoneError::Suicide);
             }
         }
 
@@ -124,7 +123,7 @@ impl Board {
         })
     }
 
-    pub fn play_random_legal_move(&self, color: Color, rng: &mut impl rand::Rng) -> Option<Board> {
+    pub fn play_random_legal_stone(&self, color: Color, rng: &mut impl rand::Rng) -> Option<Board> {
         // TODO: Perf: This could probably be made faster, somehow
         //  - PDEP for selecting bits within lane
         //  - Don't recalculate popcnt in every loop
@@ -397,7 +396,7 @@ mod test {
             let pos = Position::new(coords.0, coords.1);
             assert_eq!(
                 board.play_stone(pos, color),
-                Err(MoveError::NonEmptyPosition)
+                Err(PlayStoneError::NonEmptyPosition)
             );
         }
 
@@ -533,7 +532,7 @@ mod test {
 
                 assert_eq!(
                     board.play_stone(Position::new(0, 0), Color::Black),
-                    Err(MoveError::NonEmptyPosition)
+                    Err(PlayStoneError::NonEmptyPosition)
                 );
             }
 
@@ -542,7 +541,7 @@ mod test {
                 let board = Board::from_ascii(".ooooo\noxxxxo\noxx.xo\noxxxxo\noooooo").unwrap();
                 assert_eq!(
                     board.play_stone(Position::new(2, 3), Color::Black),
-                    Err(MoveError::Suicide)
+                    Err(PlayStoneError::Suicide)
                 );
             }
 
@@ -640,14 +639,13 @@ mod test {
 
             match board.play_stone(pos, color) {
                 Ok(_) => assert!(empty.get(pos)),
-                Err(MoveError::NonEmptyPosition) => {
+                Err(PlayStoneError::NonEmptyPosition) => {
                     assert!(!empty.get(pos))
                 }
-                Err(MoveError::Suicide) => {
+                Err(PlayStoneError::Suicide) => {
                     assert!(empty.get(pos));
                     assert_eq!(move_mask.dilate() & empty, move_mask);
                 }
-                Err(MoveError::Ko) => unimplemented!("play_stone never returns ko error"),
             };
         }
 
@@ -781,7 +779,7 @@ mod test {
         fn some_if_legal_moves_exist(board: Board, color: Color, seed: u64) {
             let mut rng = rand::rngs::SmallRng::seed_from_u64(seed);
             assert_eq!(
-                board.play_random_legal_move(color, &mut rng).is_some(),
+                board.play_random_legal_stone(color, &mut rng).is_some(),
                 board.legal_moves(color).count() > 0
             );
         }
@@ -800,7 +798,7 @@ mod test {
                     break;
                 }
 
-                let random_board = board.play_random_legal_move(color, &mut rng).unwrap();
+                let random_board = board.play_random_legal_stone(color, &mut rng).unwrap();
 
                 if let Some(index) = remaining_moves.iter().position(|b| b == &random_board) {
                     remaining_moves.swap_remove(index);
