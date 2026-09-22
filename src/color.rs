@@ -1,6 +1,6 @@
 use std::{
     fmt::Debug,
-    ops::{Index, IndexMut, Not},
+    ops::{Add, Index, IndexMut, Not, Sub},
 };
 
 /// Stone color on the board.
@@ -45,45 +45,57 @@ impl Not for Color {
 /// Collection indexed by `Color`.
 #[derive(Default, Clone, PartialEq, Eq)]
 pub struct ColorMap<V> {
-    values: [V; 2],
+    pub black: V,
+    pub white: V,
 }
 
 impl<T> ColorMap<T> {
     /// Returns a `ColorMap` with function `f` applied to each element.
     /// Black is processed first, then White.
-    pub fn map<U>(self, f: impl FnMut(T) -> U) -> ColorMap<U> {
+    pub fn map<U>(self, mut f: impl FnMut(T) -> U) -> ColorMap<U> {
         ColorMap {
-            values: self.values.map(f),
+            black: f(self.black),
+            white: f(self.white),
         }
     }
 
     /// Returns a `ColorMap` with function `f` applied to each element.
     /// Black is processed first, then White.
-    pub fn map_ref<U>(&self, f: impl FnMut(&T) -> U) -> ColorMap<U> {
+    pub fn map_ref<U>(&self, mut f: impl FnMut(&T) -> U) -> ColorMap<U> {
         ColorMap {
-            values: self.values.each_ref().map(f),
+            black: f(&self.black),
+            white: f(&self.white),
+        }
+    }
+
+    /// Returns a `ColorMap` with function `f` applied to each element.
+    /// Black is processed first, then White.
+    pub fn map2<U, V>(self, other: ColorMap<U>, mut f: impl FnMut(T, U) -> V) -> ColorMap<V> {
+        ColorMap {
+            black: f(self.black, other.black),
+            white: f(self.white, other.white),
         }
     }
 
     /// Borrows each held element and returns colormap of references.
     pub fn as_ref(&self) -> ColorMap<&T> {
         ColorMap {
-            values: self.values.each_ref(),
+            black: &self.black,
+            white: &self.white,
         }
     }
 
     /// Convert the colormap to raw array.
     pub fn into_array(self) -> [T; 2] {
-        self.values
+        [self.black, self.white]
     }
 
     /// Returns the content from perspective of given color.
     /// Complementary to `ColorMap::from_perspective`.
     pub fn into_perspective(self, color: Color) -> (T, T) {
-        let [b, w] = self.values;
         match color {
-            Color::Black => (b, w),
-            Color::White => (w, b),
+            Color::Black => (self.black, self.white),
+            Color::White => (self.white, self.black),
         }
     }
 
@@ -92,10 +104,12 @@ impl<T> ColorMap<T> {
     pub fn from_perspective(color: Color, own: T, other: T) -> ColorMap<T> {
         match color {
             Color::Black => ColorMap {
-                values: [own, other],
+                black: own,
+                white: other,
             },
             Color::White => ColorMap {
-                values: [other, own],
+                black: other,
+                white: own,
             },
         }
     }
@@ -103,8 +117,10 @@ impl<T> ColorMap<T> {
 
 impl<T: IntoIterator> ColorMap<T> {
     pub fn zip(self) -> impl Iterator<Item = ColorMap<T::Item>> {
-        let [b, w] = self.values;
-        b.into_iter().zip(w).map(|(b, w)| [b, w].into())
+        self.black
+            .into_iter()
+            .zip(self.white)
+            .map(|(black, white)| ColorMap { black, white })
     }
 }
 
@@ -116,7 +132,8 @@ impl<T: Debug> Debug for ColorMap<T> {
 
 impl<T> From<[T; 2]> for ColorMap<T> {
     fn from(values: [T; 2]) -> Self {
-        Self { values }
+        let [black, white] = values;
+        ColorMap { black, white }
     }
 }
 
@@ -130,13 +147,19 @@ impl<T> Index<Color> for ColorMap<T> {
     type Output = T;
 
     fn index(&self, index: Color) -> &Self::Output {
-        &self.values[usize::from(index)]
+        match index {
+            Color::Black => &self.black,
+            Color::White => &self.white,
+        }
     }
 }
 
 impl<T> IndexMut<Color> for ColorMap<T> {
     fn index_mut(&mut self, index: Color) -> &mut Self::Output {
-        &mut self.values[usize::from(index)]
+        match index {
+            Color::Black => &mut self.black,
+            Color::White => &mut self.white,
+        }
     }
 }
 
@@ -145,8 +168,29 @@ impl<T> IntoIterator for ColorMap<T> {
     type IntoIter = std::array::IntoIter<(Color, T), 2>;
 
     fn into_iter(self) -> Self::IntoIter {
-        let [b, w] = self.values;
-        [(Color::Black, b), (Color::White, w)].into_iter()
+        [(Color::Black, self.black), (Color::White, self.white)].into_iter()
+    }
+}
+
+impl<T, U> Add<ColorMap<U>> for ColorMap<T>
+where
+    T: Add<U>,
+{
+    type Output = ColorMap<T::Output>;
+
+    fn add(self, rhs: ColorMap<U>) -> Self::Output {
+        self.map2(rhs, Add::add)
+    }
+}
+
+impl<T, U> Sub<ColorMap<U>> for ColorMap<T>
+where
+    T: Sub<U>,
+{
+    type Output = ColorMap<T::Output>;
+
+    fn sub(self, rhs: ColorMap<U>) -> Self::Output {
+        self.map2(rhs, Sub::sub)
     }
 }
 

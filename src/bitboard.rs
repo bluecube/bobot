@@ -119,13 +119,10 @@ impl Bitboard16 {
     }
 
     /// Calculates the number of set bits in the bitboard
-    pub fn popcnt(&self) -> usize {
+    pub fn popcnt(&self) -> u32 {
         // Converting to u64x4 first compiles to better assembly
         let as64: u64x4 = bytemuck::cast(self.bits);
-        as64.as_array()
-            .iter()
-            .map(|x| x.count_ones() as usize)
-            .sum()
+        as64.as_array().iter().map(|x| x.count_ones()).sum()
     }
 
     /// Returns true if all positions are unset.
@@ -811,7 +808,10 @@ mod test {
 
         #[property_test]
         fn popcnt(bb: Bitboard16) {
-            assert_eq!(bb.iter_rows().flatten().filter(|b| *b).count(), bb.popcnt());
+            assert_eq!(
+                bb.iter_rows().flatten().filter(|b| *b).count() as u32,
+                bb.popcnt()
+            );
         }
 
         #[property_test]

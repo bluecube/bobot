@@ -38,6 +38,7 @@ pub struct Board {
 
 impl Board {
     pub const SIZE: usize = 13;
+    pub const AREA: u32 = (Self::SIZE * Self::SIZE) as u32;
 
     pub fn new() -> Board {
         Board::default()
@@ -132,7 +133,7 @@ impl Board {
 
         while !candidates.is_empty() {
             let i = rng.random_range(0..candidates.popcnt());
-            let pos = candidates.iter_positions().nth(i).unwrap();
+            let pos = candidates.iter_positions().nth(i as usize).unwrap();
             if let Ok(new_board) = self.play_stone(pos, color) {
                 return Some(new_board);
             } else {
@@ -143,25 +144,21 @@ impl Board {
         None
     }
 
-    pub fn score(&self) -> ColorMap<usize> {
-        let neighbors = self.stones.map_ref(|stones| stones.dilate());
-        let mut score = self.stones.map_ref(|stones| stones.popcnt());
-        for empty_group in self.empty_positions().iter_groups() {
-            let adjanced_to = neighbors.map_ref(|neighbors| !(empty_group & neighbors).is_empty());
-            if adjanced_to[Color::Black] && adjanced_to[Color::White] {
-                // Neutral
-                continue;
-            }
-
-            if adjanced_to[Color::Black] {
-                score[Color::Black] += empty_group.popcnt();
-            }
-            if adjanced_to[Color::White] {
-                score[Color::White] += empty_group.popcnt();
-            }
-        }
-
-        score
+    /// Returns the area sizes for both players.
+    pub fn areas(&self) -> ColorMap<u32> {
+        let empty = self.empty_positions();
+        let reachable = self.stones.map_ref(|stones| {
+            let reachable_empty = (stones.dilate() & empty).flood_fill(empty);
+            debug_assert!((stones & reachable_empty).is_empty());
+            reachable_empty | stones
+        });
+        let neutral = reachable.black & reachable.white;
+        debug_assert_eq!(
+            empty & neutral,
+            neutral,
+            "Neutral positions are a subset of empty positions"
+        );
+        reachable.map_ref(|reachable| (reachable & !neutral).popcnt())
     }
 
     pub fn legal_moves(&self, color: Color) -> impl Iterator<Item = (Position, Board)> {
@@ -279,11 +276,11 @@ impl proptest::arbitrary::Arbitrary for Board {
 
         (Bitboard16::arbitrary_with(Some(Board::SIZE)), 0f64..=1f64)
             .prop_flat_map(|(occupancy, white_ratio)| {
-                let count = occupancy.popcnt();
+                let count = occupancy.popcnt() as usize;
                 (Just(occupancy), vec(weighted(white_ratio), count..=count))
             })
             .prop_map(|(occupancy, white_vec)| {
-                assert_eq!(occupancy.popcnt(), white_vec.len());
+                assert_eq!(occupancy.popcnt() as usize, white_vec.len());
 
                 let white: Bitboard16 = occupancy
                     .iter_positions()
@@ -716,32 +713,32 @@ mod test {
 
         #[test]
         fn empty() {
-            assert_eq!(Board::new().score(), [0, 0].into());
+            assert_eq!(Board::new().areas(), [0, 0].into());
         }
 
         #[property_test]
         fn stone_count(board: Board) {
-            for (color, score) in board.score() {
+            for (color, score) in board.areas() {
                 assert!(score >= board.stones[color].popcnt());
             }
         }
 
         #[property_test]
         fn limited_by_board_size(board: Board) {
-            let [black, white] = board.score().into();
-            assert!(black + white <= Board::SIZE * Board::SIZE);
+            let [black, white] = board.areas().into();
+            assert!(black + white <= Board::AREA);
         }
 
         #[property_test]
         fn color_swap_swaps(board: Board) {
-            let [black, white] = board.score().into();
+            let [black, white] = board.areas().into();
             let swapped_board = color_swap(board);
-            assert_eq!(swapped_board.score(), [white, black].into());
+            assert_eq!(swapped_board.areas(), [white, black].into());
         }
 
         #[property_test]
         fn transpose_no_change(board: Board) {
-            assert_eq!(board.score(), transpose(board).score());
+            assert_eq!(board.areas(), transpose(board).areas());
         }
 
         #[property_test]
@@ -756,17 +753,14 @@ mod test {
                 Board::from_stones(ColorMap::from_perspective(color, stones, Bitboard16::new()))
                     .unwrap();
 
-            assert_eq!(
-                board.score().into_perspective(color),
-                (Board::SIZE * Board::SIZE, 0)
-            );
+            assert_eq!(board.areas().into_perspective(color), (Board::AREA, 0));
         }
 
         #[test]
         fn example() {
             let board = Board::from_ascii("\n\n\nxxxxxxxxxxxxx\n\n\n\nooooooooooooo").unwrap();
 
-            assert_eq!(board.score(), [4 * 13, 6 * 13].into());
+            assert_eq!(board.areas(), [4 * 13, 6 * 13].into());
         }
     }
 
