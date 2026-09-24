@@ -6,3 +6,4 @@
 # everyone who runs the test benefits from these saved cases.
 cc cdf0a3ed0572836f1223a1f7a207b14c0c79d4efeca68dac98b522e96c8a05dc # shrinks to LeftArgs = LeftArgs { bb: Bitboard16 { bits: (0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1) }, n: 1 }
 cc f3ce7d3997ef1fc8d565373638ec85bf3077fd1207cb65aa0f611c769bb4a694 # shrinks to BoardMaskBitsArgs = BoardMaskBitsArgs { board_size: 16 }
+cc 41e41cf4b7d37799a1d04ff1f5a3791f2f8f8398fc3cf092edfc14cb93daa9e9 # shrinks to FirstLineMaskPopcntArgs = FirstLineMaskPopcntArgs { board_size: 1 }

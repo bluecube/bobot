@@ -70,6 +70,26 @@ impl Bitboard16 {
         }
     }
 
+    /// Creates a mask where the first line, last line, first column and last column are set.
+    /// `board_size` must be nonzero.
+    pub fn first_line_mask(board_size: usize) -> Self {
+        assert!(board_size > 0);
+        let edge_row_bits = 1u16.unbounded_shl(board_size as u32).wrapping_sub(1);
+        let middle_row_bits = 1u16.unbounded_shl(board_size as u32 - 1) | 1u16;
+        let array = std::array::from_fn(|i| {
+            if i == 0 || i == (board_size - 1) {
+                edge_row_bits
+            } else if i < board_size {
+                middle_row_bits
+            } else {
+                0
+            }
+        });
+        Bitboard16 {
+            bits: u16x16::new(array),
+        }
+    }
+
     /// Returns a value of a single bit. Slow.
     /// Panics on out of range index.
     pub fn get(&self, pos: Position) -> bool {
@@ -204,9 +224,13 @@ impl Bitboard16 {
 
 /// Dilation and flood fill
 impl Bitboard16 {
+    pub fn orthogonal_neighbors(&self) -> Bitboard16 {
+        self.shift_left(1) | self.shift_right(1) | self.shift_up(1) | self.shift_down(1)
+    }
+
     /// Expands the bitboard four ways (left, right, up, down) by one position.
     pub fn dilate(&self) -> Bitboard16 {
-        self | self.shift_left(1) | self.shift_right(1) | self.shift_up(1) | self.shift_down(1)
+        self | self.orthogonal_neighbors()
     }
 
     /// Expands the bitboard in self to fill contiguous area within `mask`.
@@ -291,21 +315,21 @@ impl Bitboard16 {
 /// Shifting
 impl Bitboard16 {
     /// Shifts the content of the bitboard to the left (decreasing column indices of set bits).
-    fn shift_left(&self, n: usize) -> Bitboard16 {
+    pub fn shift_left(&self, n: usize) -> Bitboard16 {
         Bitboard16 {
             bits: self.bits.unbounded_shr_scalar(n as u32),
         }
     }
 
     /// Shifts the content of the bitboard to the right (increasing column indices of set bits).
-    fn shift_right(&self, n: usize) -> Bitboard16 {
+    pub fn shift_right(&self, n: usize) -> Bitboard16 {
         Bitboard16 {
             bits: self.bits.unbounded_shl_scalar(n as u32),
         }
     }
 
     /// Shifts the content of the bitboard up (decreasing row indices of set bits).
-    fn shift_up(&self, n: usize) -> Bitboard16 {
+    pub fn shift_up(&self, n: usize) -> Bitboard16 {
         assert!(n < Self::SIZE);
         let input_array = self.bits.as_array();
 
@@ -323,7 +347,7 @@ impl Bitboard16 {
     }
 
     /// Shifts the content of the bitboard down (increasing row indices of set bits).
-    fn shift_down(&self, n: usize) -> Bitboard16 {
+    pub fn shift_down(&self, n: usize) -> Bitboard16 {
         assert!(n < Self::SIZE);
         let input_array = self.bits.as_array();
 
@@ -645,6 +669,32 @@ mod test {
                 }
             }
         }
+    }
+
+    #[property_test]
+    fn first_line_mask_bits(#[strategy = 1usize..=Bitboard16::SIZE] board_size: usize) {
+        let mask = Bitboard16::first_line_mask(board_size);
+
+        for row in 0..Bitboard16::SIZE {
+            for col in 0..Bitboard16::SIZE {
+                let expected = (row < board_size && col < board_size)
+                    && ((row == 0)
+                        || (col == 0)
+                        || (row == board_size - 1)
+                        || (col == board_size - 1));
+                assert_eq!(mask.get(Position::new(row, col)), expected, "{row}, {col}");
+            }
+        }
+    }
+
+    #[property_test]
+    fn first_line_mask_popcnt(#[strategy = 1usize..=Bitboard16::SIZE] board_size: usize) {
+        let expected = if board_size == 1 {
+            1
+        } else {
+            4 * (board_size - 1) as u32
+        };
+        assert_eq!(Bitboard16::first_line_mask(board_size).popcnt(), expected)
     }
 
     #[property_test]
@@ -1059,6 +1109,76 @@ mod test {
         #[property_test]
         fn transpose_symmetry(bb: Bitboard16) {
             assert_eq!(transpose(bb.dilate()), transpose(bb).dilate());
+        }
+    }
+
+    mod orthogonal_neighbors {
+        use super::*;
+
+        #[property_test]
+        fn is_dilate_subset(bb: Bitboard16) {
+            let x = bb.orthogonal_neighbors();
+            assert_eq!(x & bb.dilate(), x);
+        }
+
+        #[test]
+        fn example_middle() {
+            let bb = Bitboard16::single(Position { row: 4, col: 12 }).orthogonal_neighbors();
+
+            assert_eq!(bb.popcnt(), 4);
+            assert!(bb.get(Position { row: 3, col: 12 }));
+            assert!(bb.get(Position { row: 5, col: 12 }));
+            assert!(bb.get(Position { row: 4, col: 11 }));
+            assert!(bb.get(Position { row: 4, col: 13 }));
+        }
+
+        #[test]
+        fn example_corner() {
+            let bb = Bitboard16::single(Position { row: 15, col: 15 }).orthogonal_neighbors();
+
+            assert_eq!(bb.popcnt(), 2);
+            assert!(bb.get(Position { row: 14, col: 15 }));
+            assert!(bb.get(Position { row: 15, col: 14 }));
+        }
+
+        #[test]
+        fn single_point_does_not_include_self() {
+            let single = Bitboard16::single(Position { row: 3, col: 14 });
+            assert!((single.orthogonal_neighbors() & single).is_empty());
+        }
+
+        #[test]
+        fn neighboring_points_contains_self() {
+            let two = Bitboard16::from_ascii("\n\n....xx");
+
+            assert_eq!(two.orthogonal_neighbors() & two, two);
+        }
+
+        fn orthogonal_neighbors_reference(bb: Bitboard16) -> Bitboard16 {
+            let mut output = Bitboard16::new();
+            for Position { row: r, col: c } in bb.iter_positions() {
+                if r > 0 {
+                    output.set(Position::new(r - 1, c), true);
+                }
+                if r < 15 {
+                    output.set(Position::new(r + 1, c), true);
+                }
+                if c > 0 {
+                    output.set(Position::new(r, c - 1), true);
+                }
+                if c < 15 {
+                    output.set(Position::new(r, c + 1), true);
+                }
+            }
+            output
+        }
+
+        #[property_test]
+        fn reference(bb: Bitboard16) {
+            assert_eq!(
+                bb.orthogonal_neighbors(),
+                orthogonal_neighbors_reference(bb)
+            );
         }
     }
 
