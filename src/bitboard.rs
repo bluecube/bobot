@@ -4,36 +4,15 @@ use std::{
 };
 
 use bit_iter::BitIter;
-use serde::{Deserialize, Serialize};
 use wide::{u16x16, u64x4};
+
+use crate::geometry::{Position, Symmetry};
 
 /// Bitboard for represetnting positions on a board.
 /// This implementation only handles for board sizes <= 16 (9x9 and 13x13).
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub struct Bitboard16 {
     bits: u16x16,
-}
-
-/// Position on the board
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Hash)]
-pub struct Position {
-    pub row: usize,
-    pub col: usize,
-}
-
-impl Position {
-    pub fn new(row: usize, col: usize) -> Self {
-        Self { row, col }
-    }
-}
-
-impl From<(usize, usize)> for Position {
-    fn from(value: (usize, usize)) -> Self {
-        Position {
-            row: value.0,
-            col: value.1,
-        }
-    }
 }
 
 impl Default for Bitboard16 {
@@ -219,6 +198,77 @@ impl Bitboard16 {
         Bitboard16 {
             bits: bytemuck::cast(single_bits & mask),
         }
+    }
+}
+
+/// Flips, transposes and symmetries
+impl Bitboard16 {
+    /// Horizontally flips positions in the bitboard.
+    fn hflip16(&self) -> Bitboard16 {
+        let mut x = self.bits;
+
+        x = (x >> 8) | (x << 8);
+        x = (x & 0xF0F0) >> 4 | (x & 0x0F0F) << 4;
+        x = (x & 0xCCCC) >> 2 | (x & 0x3333) << 2;
+        x = (x & 0xAAAA) >> 1 | (x & 0x5555) << 1;
+
+        Bitboard16 { bits: x }
+    }
+
+    /// Vertically flips positions in the bitboard.
+    fn vflip16(&self) -> Bitboard16 {
+        // Unfortunately Rust's codegen doesn't recognize the byte swap without converting
+        // to u64x4 and doing half of it manually.
+        let as64: u64x4 = bytemuck::cast(self.bits);
+        let vflipped64 = {
+            let mut x = as64;
+
+            x = (x >> 32) | (x << 32);
+            x = (x & 0xFFFF0000FFFF0000) >> 16 | (x & 0x0000FFFF0000FFFF) << 16;
+            x
+        };
+        let input_array = vflipped64.as_array();
+
+        let output_array = array::from_fn(|i| input_array[input_array.len() - i - 1]);
+
+        Bitboard16 {
+            bits: bytemuck::cast(u64x4::new(output_array)),
+        }
+    }
+
+    /// Transposes the positions of the bitboard around the main diagonal.
+    /// Not super fast.
+    fn transpose(&self) -> Bitboard16 {
+        let mut result = Bitboard16::new();
+
+        for pos in self.iter_positions() {
+            result.set(
+                Position {
+                    row: pos.col,
+                    col: pos.row,
+                },
+                true,
+            );
+        }
+
+        result
+    }
+
+    pub fn apply_symmetry(&self, symmetry: Symmetry, board_size: usize) -> Bitboard16 {
+        let mut b = *self;
+        let shift = Bitboard16::SIZE - board_size;
+
+        if symmetry.hflip {
+            b = b.hflip16().shift_left(shift);
+        }
+        if symmetry.vflip {
+            b = b.vflip16().shift_up(shift);
+        }
+        if symmetry.transpose {
+            b = b.transpose();
+        }
+
+        b
     }
 }
 
@@ -604,14 +654,6 @@ mod test {
     use crate::bitboard::{Bitboard16, Position};
     use proptest::{property_test, strategy::Just};
 
-    fn transpose(bb: Bitboard16) -> Bitboard16 {
-        let mut output = Bitboard16::new();
-        for pos in bb.iter_positions() {
-            output.set(Position::new(pos.col, pos.row), true);
-        }
-        output
-    }
-
     #[property_test]
     fn sized_bitboard_witin_mask(
         #[strategy = (0usize..Bitboard16::SIZE)
@@ -973,17 +1015,17 @@ mod test {
             }
         }
 
-        mod transpose_symmetry {
+        mod symmetry {
             use super::*;
 
             #[property_test]
             fn left_up(bb: Bitboard16, #[strategy = 0usize..Bitboard16::SIZE] n: usize) {
-                assert_eq!(transpose(bb.shift_left(n)), transpose(bb).shift_up(n))
+                assert_eq!(bb.shift_left(n).transpose(), bb.transpose().shift_up(n))
             }
 
             #[property_test]
             fn right_down(bb: Bitboard16, #[strategy = 0usize..Bitboard16::SIZE] n: usize) {
-                assert_eq!(transpose(bb.shift_right(n)), transpose(bb).shift_down(n))
+                assert_eq!(bb.shift_right(n).transpose(), bb.transpose().shift_down(n))
             }
         }
 
@@ -1006,6 +1048,7 @@ mod test {
 
     mod dilate {
         use super::*;
+        use crate::geometry::Symmetry;
 
         #[property_test]
         fn single_position_dilates_to_five(
@@ -1107,8 +1150,11 @@ mod test {
         }
 
         #[property_test]
-        fn transpose_symmetry(bb: Bitboard16) {
-            assert_eq!(transpose(bb.dilate()), transpose(bb).dilate());
+        fn symmetry(bb: Bitboard16, symmetry: Symmetry) {
+            assert_eq!(
+                bb.dilate().apply_symmetry(symmetry, Bitboard16::SIZE),
+                bb.apply_symmetry(symmetry, Bitboard16::SIZE).dilate()
+            );
         }
     }
 
@@ -1183,6 +1229,8 @@ mod test {
     }
 
     mod flood_fill {
+        use crate::Symmetry;
+
         use super::*;
 
         #[property_test]
@@ -1221,10 +1269,12 @@ mod test {
         }
 
         #[property_test]
-        fn transpose_symmetry(seed: Bitboard16, mask: Bitboard16) {
+        fn symmetry(seed: Bitboard16, mask: Bitboard16, symmetry: Symmetry) {
             assert_eq!(
-                transpose(seed).flood_fill(transpose(mask)),
-                transpose(seed.flood_fill(mask))
+                seed.apply_symmetry(symmetry, Bitboard16::SIZE)
+                    .flood_fill(mask.apply_symmetry(symmetry, Bitboard16::SIZE)),
+                seed.flood_fill(mask)
+                    .apply_symmetry(symmetry, Bitboard16::SIZE)
             );
         }
 
@@ -1236,8 +1286,8 @@ mod test {
         mod examples {
             use super::*;
 
-            #[test]
-            fn snake1() {
+            #[property_test]
+            fn snake1(symmetry: Symmetry) {
                 let mask = Bitboard16::from_ascii(
                     "xxxxxxxxxxxxxxxx\n\
                      ...............x\n\
@@ -1258,12 +1308,15 @@ mod test {
                 );
                 let seed = Bitboard16::single(Position::new(0, 0));
 
-                assert_eq!(seed.flood_fill(mask), mask);
-                assert_eq!(seed.flood_fill(transpose(mask)), transpose(mask));
+                assert_eq!(
+                    seed.apply_symmetry(symmetry, Bitboard16::SIZE)
+                        .flood_fill(mask.apply_symmetry(symmetry, Bitboard16::SIZE)),
+                    mask.apply_symmetry(symmetry, Bitboard16::SIZE)
+                );
             }
 
-            #[test]
-            fn snake2() {
+            #[property_test]
+            fn snake2(symmetry: Symmetry) {
                 let mask = Bitboard16::from_ascii(
                     "xxxxxxxxxxxxxxxx\n\
                      ...............x\n\
@@ -1284,8 +1337,11 @@ mod test {
                 );
                 let seed = Bitboard16::single(Position::new(0, 0));
 
-                assert_eq!(seed.flood_fill(mask), mask);
-                assert_eq!(seed.flood_fill(transpose(mask)), transpose(mask));
+                assert_eq!(
+                    seed.apply_symmetry(symmetry, Bitboard16::SIZE)
+                        .flood_fill(mask.apply_symmetry(symmetry, Bitboard16::SIZE)),
+                    mask.apply_symmetry(symmetry, Bitboard16::SIZE)
+                );
             }
 
             #[test]
@@ -1399,6 +1455,92 @@ mod test {
             }
 
             assert_eq!(count, bb.popcnt());
+        }
+    }
+
+    mod symmetries {
+        use crate::geometry::Symmetry;
+
+        use super::*;
+
+        #[property_test]
+        fn hflip_preserves_popcnt(bb: Bitboard16) {
+            assert_eq!(bb.hflip16().popcnt(), bb.popcnt());
+        }
+
+        #[property_test]
+        fn vflip_preserves_popcnt(bb: Bitboard16) {
+            assert_eq!(bb.vflip16().popcnt(), bb.popcnt());
+        }
+
+        #[property_test]
+        fn transpose_preserves_popcnt(bb: Bitboard16) {
+            assert_eq!(bb.transpose().popcnt(), bb.popcnt());
+        }
+
+        #[property_test]
+        fn apply_symmetry_preserves_popcnt(bb: Bitboard16, symmetry: Symmetry) {
+            assert_eq!(
+                bb.apply_symmetry(symmetry, Bitboard16::SIZE).popcnt(),
+                bb.popcnt()
+            );
+        }
+
+        #[property_test]
+        fn transpose_hflip_vflip_transpose(bb: Bitboard16) {
+            assert_eq!(bb.transpose().hflip16(), bb.vflip16().transpose());
+        }
+
+        mod single {
+            use super::*;
+
+            #[property_test]
+            fn hflip(
+                #[strategy = 0usize..16usize] row: usize,
+                #[strategy = 0usize..16usize] col: usize,
+            ) {
+                let board = Bitboard16::single(Position { row, col });
+                assert!(board.hflip16().get(Position {
+                    row,
+                    col: Bitboard16::SIZE - col - 1
+                }));
+            }
+
+            #[property_test]
+            fn vflip(
+                #[strategy = 0usize..16usize] row: usize,
+                #[strategy = 0usize..16usize] col: usize,
+            ) {
+                let board = Bitboard16::single(Position { row, col });
+                assert!(board.vflip16().get(Position {
+                    row: Bitboard16::SIZE - row - 1,
+                    col
+                }));
+            }
+
+            #[property_test]
+            fn transpose(
+                #[strategy = 0usize..16usize] row: usize,
+                #[strategy = 0usize..16usize] col: usize,
+            ) {
+                let board = Bitboard16::single(Position { row, col });
+                assert!(board.transpose().get(Position { row: col, col: row }));
+            }
+
+            #[property_test]
+            fn single_element_bitboard_symmetry_matches_position_symmetry(
+                #[strategy = (1usize..=Bitboard16::SIZE).prop_flat_map(|board_size|
+                    (Just(board_size), 0usize..board_size, 0usize..board_size)
+                )]
+                (board_size, row, col): (usize, usize, usize),
+                symmetry: Symmetry,
+            ) {
+                let pos = Position { row, col };
+                assert_eq!(
+                    Bitboard16::single(pos).apply_symmetry(symmetry, board_size),
+                    Bitboard16::single(pos.apply_symmetry(symmetry, board_size)),
+                )
+            }
         }
     }
 }

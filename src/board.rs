@@ -1,6 +1,7 @@
 use crate::{
-    bitboard::{Bitboard16, Position, format_ascii_helper},
+    bitboard::{Bitboard16, format_ascii_helper},
     color::{Color, ColorMap},
+    geometry::{Position, Symmetry},
     zobrist::ZobristHash,
 };
 use rand::RngExt as _;
@@ -31,7 +32,7 @@ pub enum BoardInvariantError {
 /// from unverified user input.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct Board {
-    stones: ColorMap<Bitboard16>,
+    pub stones: ColorMap<Bitboard16>,
 
     hash: ZobristHash,
 }
@@ -128,6 +129,7 @@ impl Board {
         // TODO: Perf: This could probably be made faster, somehow
         //  - PDEP for selecting bits within lane
         //  - Don't recalculate popcnt in every loop
+        // All improvements should be also imlpemented in solver::random_playout::random_move()
 
         let mut candidates = self.empty_positions();
 
@@ -260,6 +262,14 @@ impl Board {
 
         Ok(())
     }
+
+    pub fn apply_symmetry(self, symmetry: Symmetry) -> Board {
+        Board::from_stones(
+            self.stones
+                .map(|bb| bb.apply_symmetry(symmetry, Board::SIZE)),
+        )
+        .unwrap()
+    }
 }
 
 #[cfg(test)]
@@ -346,6 +356,26 @@ mod test {
             ),),
             Err(BoardInvariantError::StoneOutsideBoard)
         );
+    }
+
+    mod symmetry {
+        use super::*;
+
+        #[property_test]
+        fn preserves_invariants(board: Board, symmetry: Symmetry) {
+            board.apply_symmetry(symmetry).check_invariants().unwrap();
+        }
+
+        #[property_test]
+        fn preserves_stone_counts(board: Board, symmetry: Symmetry) {
+            assert_eq!(
+                board.stones.map_ref(|x| x.popcnt()),
+                board
+                    .apply_symmetry(symmetry)
+                    .stones
+                    .map_ref(|x| x.popcnt())
+            )
+        }
     }
 
     mod play_stone {
@@ -475,6 +505,21 @@ mod test {
                     assert_eq!(group.dilate() & board.empty_positions(), move_bitmask);
                 }
             }
+
+            #[property_test]
+            fn symmetry(
+                BoardAndLegalMove(board, pos, color): BoardAndLegalMove,
+                symmetry: Symmetry,
+            ) {
+                assert_eq!(
+                    board
+                        .play_stone(pos, color)
+                        .map(|b| b.apply_symmetry(symmetry)),
+                    board
+                        .apply_symmetry(symmetry)
+                        .play_stone(pos.apply_symmetry(symmetry, Board::SIZE), color)
+                )
+            }
         }
 
         mod example {
@@ -599,7 +644,7 @@ mod test {
         use super::*;
 
         #[property_test]
-        fn are_legal_and_boards_match(board: Board, color: Color) {
+        fn legal_moves_are_legal(board: Board, color: Color) {
             for (pos, expected_result) in board.legal_moves(color) {
                 assert_eq!(board.play_stone(pos, color), Ok(expected_result));
             }
