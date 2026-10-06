@@ -4,6 +4,7 @@ use std::{
 };
 
 use bit_iter::BitIter;
+use rand::{Rng, RngExt};
 use wide::{u16x16, u64x4};
 
 use crate::geometry::{Position, Symmetry};
@@ -122,6 +123,53 @@ impl Bitboard16 {
         // Converting to u64x4 first compiles to better assembly
         let as64: u64x4 = bytemuck::cast(self.bits);
         as64.as_array().iter().map(|x| x.count_ones()).sum()
+    }
+
+    pub fn random_position(&self, rng: &mut impl Rng) -> Option<Position> {
+        let as64: u64x4 = bytemuck::cast(self.bits);
+        let popcnts = as64.as_array().map(|x| x.count_ones());
+
+        let p1 = popcnts[0];
+        let p2 = p1 + popcnts[1];
+        let p3 = p2 + popcnts[2];
+        let popcnt = p3 + popcnts[3];
+
+        if popcnt == 0 {
+            return None;
+        }
+
+        let r = rng.random_range(0..popcnt);
+        let lane = (r >= p1) as usize + (r >= p2) as usize + (r >= p3) as usize;
+        let k = r - if r >= p3 {
+            p3
+        } else if r >= p2 {
+            p2
+        } else if r >= p1 {
+            p1
+        } else {
+            0
+        };
+
+        let bits = as64.as_array()[lane];
+
+        #[cfg(not(all(target_arch = "x86_64", target_feature = "bmi2")))]
+        let j = {
+            let mut bits = bits;
+            for _ in 0..k {
+                bits = bits & bits - 1;
+            }
+            bits.trailing_zeros() as usize
+        };
+        #[cfg(all(target_arch = "x86_64", target_feature = "bmi2"))]
+        let j = {
+            use bitintr::Pdep as _;
+            (1 << k).pdep(bits).trailing_zeros() as usize
+        };
+
+        let row = 4 * lane + j / Self::SIZE;
+        let col = j % Self::SIZE;
+
+        return Some(Position { row, col });
     }
 
     /// Returns true if all positions are unset.

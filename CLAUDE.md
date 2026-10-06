@@ -22,3 +22,6 @@ There is a minimal web interface.
 - `src/color.rs` Handling of black/white, datastructure to hold per-color data.
 - `src/geometry.rs` Position and Symmetry types.
 - `webface/` Static HTML and JS code for the web interface
+
+## Misc
+- When examining the generated assembly, the target platforms are `znver4` and `x86-64-v3`.

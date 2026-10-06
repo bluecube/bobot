@@ -126,16 +126,11 @@ impl Board {
     }
 
     pub fn play_random_legal_stone(&self, color: Color, rng: &mut impl rand::Rng) -> Option<Board> {
-        // TODO: Perf: This could probably be made faster, somehow
-        //  - PDEP for selecting bits within lane
-        //  - Don't recalculate popcnt in every loop
         // All improvements should be also imlpemented in solver::random_playout::random_move()
 
         let mut candidates = self.empty_positions();
 
-        while !candidates.is_empty() {
-            let i = rng.random_range(0..candidates.popcnt());
-            let pos = candidates.iter_positions().nth(i as usize).unwrap();
+        while let Some(pos) = candidates.random_position(rng) {
             if let Ok(new_board) = self.play_stone(pos, color) {
                 return Some(new_board);
             } else {
