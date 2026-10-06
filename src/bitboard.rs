@@ -253,14 +253,9 @@ impl Bitboard16 {
 impl Bitboard16 {
     /// Horizontally flips positions in the bitboard.
     fn hflip16(&self) -> Bitboard16 {
-        let mut x = self.bits;
-
-        x = (x >> 8) | (x << 8);
-        x = (x & 0xF0F0) >> 4 | (x & 0x0F0F) << 4;
-        x = (x & 0xCCCC) >> 2 | (x & 0x3333) << 2;
-        x = (x & 0xAAAA) >> 1 | (x & 0x5555) << 1;
-
-        Bitboard16 { bits: x }
+        Bitboard16 {
+            bits: u16x16::new(self.bits.as_array().map(u16::reverse_bits)),
+        }
     }
 
     /// Vertically flips positions in the bitboard.
