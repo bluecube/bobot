@@ -62,7 +62,10 @@ impl Sub for HalfPoints {
 pub struct GameState {
     pub board: Board,
     pub to_play: Color,
+
+    /// Set of hashes of visited positions, excluding the current one.
     pub superko_history: HashSet<ZobristHash>,
+
     pub consecutive_passes: u8,
     pub komi: HalfPoints,
 }
@@ -100,9 +103,9 @@ impl GameState {
         GameState {
             board: Board::new(),
             to_play: Color::Black,
-            superko_history: HashSet::new(), // TODO: Perf the default hasher is needlessly slow
+            superko_history: HashSet::new(), // TODO: Perf: the default hasher is needlessly slow
             consecutive_passes: 0,
-            komi: HalfPoints::from(0i32), // TODO: Something reasonable;
+            komi: HalfPoints::new_round(7.5f32),
         }
     }
 
@@ -117,6 +120,9 @@ impl GameState {
         match m {
             Move::Stone(pos) => {
                 let new_board = self.board.play_stone(pos, self.to_play)?;
+                if self.superko_history.contains(&new_board.hash()) {
+                    return Err(MoveError::Ko);
+                }
                 self.superko_history.insert(self.board.hash());
                 self.board = new_board;
                 self.consecutive_passes = 0;

@@ -21,6 +21,7 @@ There is a minimal web interface.
 - `src/bitboard.rs` Implementation of bitboard operations. Currently only for board sizes up to 16x16.
 - `src/color.rs` Handling of black/white, datastructure to hold per-color data.
 - `src/geometry.rs` Position and Symmetry types.
+- `src/bin/webface.rs` Code for the web interface.
 - `webface/` Static HTML and JS code for the web interface
 - `benches/` Benchmarks
 
