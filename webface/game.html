@@ -46,6 +46,10 @@
           mask = game_state_json['legal_moves'].split('\n');
           b.set_stones(stones);
           b.set_move_preview('black', mask);
+          if (game_state_json['last_move']?.['Stone']) {
+            const pos = game_state_json['last_move']['Stone']
+            b.set_marked_position([pos['row'], pos['col']], 'black');
+          }
           document.getElementById('stats').innerText = "Hash: " + game_state_json['board_hash'];
       }
 
@@ -66,6 +70,7 @@
         // Immediate response:
         b.set_stones(place_stone(stones, row, col, 'x'));
         b.set_move_preview(null, null); // Disable previews while the computer move is in flight
+        b.set_marked_position([row, col], 'white');
 
         play_move(row, col).then(update);
       };

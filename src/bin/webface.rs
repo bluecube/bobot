@@ -14,26 +14,35 @@ use serde::Serialize;
 type GameId = u128;
 
 struct AppState {
-    games: DashMap<GameId, GameState>,
+    games: DashMap<GameId, WebfaceGameState>,
+}
+
+#[derive(Debug, Default)]
+struct WebfaceGameState {
+    game_state: GameState,
+    last_move: Option<Move>,
 }
 
 #[derive(Serialize)]
 struct GameStateResponse {
     board: String,
+    last_move: Option<Move>,
     legal_moves: String,
 }
 
-impl From<&GameState> for GameStateResponse {
-    fn from(value: &GameState) -> Self {
+impl From<&WebfaceGameState> for GameStateResponse {
+    fn from(value: &WebfaceGameState) -> Self {
         GameStateResponse {
-            board: value.board.format_ascii(true),
+            board: value.game_state.board.format_ascii(true),
             legal_moves: (!Bitboard16::from_iter(
                 value
+                    .game_state
                     .board
                     .legal_moves(Color::Black)
                     .map(|(pos, _board)| pos),
             ))
             .format_ascii(0),
+            last_move: value.last_move.clone(),
         }
     }
 }
@@ -77,7 +86,7 @@ async fn board_js() -> impl IntoResponse {
 #[axum::debug_handler]
 async fn new_game(State(app): State<Arc<AppState>>) -> Redirect {
     let game_id = rand::random();
-    app.games.insert(game_id, GameState::new());
+    app.games.insert(game_id, WebfaceGameState::default());
 
     Redirect::to(&format!("/games/{game_id}"))
 }
@@ -98,13 +107,29 @@ async fn play_move(
     Path(game_id): Path<GameId>,
     Json(next_move): Json<Move>,
 ) -> Result<Json<GameStateResponse>, StatusCode> {
+    // Play the input move
+    let game_state = {
     let mut game = app.games.get_mut(&game_id).ok_or(StatusCode::NOT_FOUND)?;
 
-    game.play_move(next_move)
+        game.game_state
+            .play_move(next_move)
         .map_err(|_| StatusCode::CONFLICT)?;
 
-    game.play_random_legal_move(&mut rand::rng())
+        game.game_state.clone()
+    };
+
+    let best_move = game_state
+        .board
+        .play_random_legal_stone(Color::White, &mut rand::rng())
+        .map(|(pos, _board)| Move::Stone(pos))
+        .unwrap_or(Move::Pass);
+
+    // Play the response move
+    let mut game = app.games.get_mut(&game_id).ok_or(StatusCode::NOT_FOUND)?;
+    game.game_state
+        .play_move(best_move.clone())
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    game.last_move = Some(best_move);
 
     Ok(Json(GameStateResponse::from(game.deref())))
 }

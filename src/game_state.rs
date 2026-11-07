@@ -4,7 +4,7 @@ use std::{
     ops::{Add, Sub},
 };
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::{Board, Color, Position, ZobristHash, board::PlayStoneError};
 
@@ -67,7 +67,7 @@ pub struct GameState {
     pub komi: HalfPoints,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Move {
     Stone(Position),
     Pass,
@@ -86,6 +86,12 @@ impl From<PlayStoneError> for MoveError {
             PlayStoneError::NonEmptyPosition => MoveError::NonEmptyPosition,
             PlayStoneError::Suicide => MoveError::Suicide,
         }
+    }
+}
+
+impl Default for GameState {
+    fn default() -> Self {
+        GameState::new()
     }
 }
 
@@ -118,23 +124,6 @@ impl GameState {
             Move::Pass => {
                 self.consecutive_passes += 1;
             }
-        }
-
-        self.to_play = !self.to_play;
-
-        Ok(())
-    }
-
-    pub fn play_random_legal_move(&mut self, rng: &mut impl rand::Rng) -> Result<(), MoveError> {
-        if self.is_finished() {
-            return Err(MoveError::GameFinished);
-        }
-        if let Some(new_board) = self.board.play_random_legal_stone(self.to_play, rng) {
-            self.superko_history.insert(self.board.hash());
-            self.board = new_board;
-            self.consecutive_passes = 0;
-        } else {
-            self.consecutive_passes += 1;
         }
 
         self.to_play = !self.to_play;

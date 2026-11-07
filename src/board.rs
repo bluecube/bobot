@@ -4,7 +4,6 @@ use crate::{
     geometry::{Position, Symmetry},
     zobrist::ZobristHash,
 };
-use rand::RngExt as _;
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum PlayStoneError {
@@ -125,14 +124,18 @@ impl Board {
         })
     }
 
-    pub fn play_random_legal_stone(&self, color: Color, rng: &mut impl rand::Rng) -> Option<Board> {
+    pub fn play_random_legal_stone(
+        &self,
+        color: Color,
+        rng: &mut impl rand::Rng,
+    ) -> Option<(Position, Board)> {
         // All improvements should be also imlpemented in solver::random_playout::random_move()
 
         let mut candidates = self.empty_positions();
 
         while let Some(pos) = candidates.random_position(rng) {
             if let Ok(new_board) = self.play_stone(pos, color) {
-                return Some(new_board);
+                return Some((pos, new_board));
             } else {
                 candidates.set(pos, false);
             }

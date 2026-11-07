@@ -7,6 +7,7 @@ export class Board {
   #move_preview;
   #move_preview_mask;
   #move_preview_last_pos;
+  #mark;
   
   constructor(element_id, size) {
     this.#size = Number(size);
@@ -17,11 +18,12 @@ export class Board {
 
     this.#board.setAttribute("viewBox", "-1 -1 " + (this.#size + 1) + " " + (this.#size + 1))
 
-    const [children, stones_group, move_preview] = this.#make_board();
+    const [children, stones_group, move_preview, mark] = this.#make_board();
     this.#board.replaceChildren(...children);
     this.#stones_group = stones_group;
     this.#move_preview = move_preview;
     this.#move_preview_last_pos = [0, 0];
+    this.#mark = mark;
 
     this.on_click = null;
 
@@ -90,6 +92,14 @@ export class Board {
     this.#move_preview.classList.remove('stone-black');
     this.#move_preview.classList.remove('stone-white');
     this.#move_preview.classList.add('stone-' + color);
+  }
+
+  set_marked_position(pos, stroke_color) {
+    const [row, col] = pos;
+    this.#mark.setAttribute('visibility', 'visible');
+    this.#mark.setAttribute('cx', col);
+    this.#mark.setAttribute('cy', row);
+    this.#mark.setAttribute('stroke', stroke_color);
   }
 
   #place_move_preview(pos) {
@@ -163,7 +173,10 @@ export class Board {
     stones_group.classList.add('stones');
     elements.push(stones_group);
 
-    return [elements, stones_group, move_preview];
+    const mark = this.#make_mark();
+    elements.push(mark);
+
+    return [elements, stones_group, move_preview, mark];
   }
 
   #make_line(x1, y1, x2, y2) {
@@ -195,6 +208,18 @@ export class Board {
     c.setAttribute('r', 0.3);
     c.setAttribute('fill', color)
     c.setAttribute('stroke', 'black')
+    c.setAttribute('stroke-width', '0.025')
+    return c;
+  }
+
+  #make_mark() {
+    let c = document.createElementNS(svg_ns, 'circle');
+    c.classList.add('mark');
+    c.setAttribute('cx', 0);
+    c.setAttribute('cy', 0);
+    c.setAttribute('r', 0.12);
+    c.setAttribute('fill', 'none');
+    c.setAttribute('visibility', 'hidden');
     c.setAttribute('stroke-width', '0.025')
     return c;
   }
