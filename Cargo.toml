@@ -9,6 +9,10 @@ edition = "2024"
 name = "webface"
 
 [[bench]]
+name = "random_rollout"
+harness = false
+
+[[bench]]
 name = "bitboard"
 harness = false
 

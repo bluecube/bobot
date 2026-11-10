@@ -7,9 +7,10 @@ use axum::{
     response::{Html, IntoResponse, Json, Redirect},
     routing::{get, post},
 };
-use bobot::{Bitboard16, Color, GameState, Move};
+use bobot::{Bitboard16, Color, GameState, Move, solver::Solver};
 use dashmap::DashMap;
 use serde::Serialize;
+use tokio::task::spawn_blocking;
 
 type GameId = u128;
 
@@ -109,20 +110,29 @@ async fn play_move(
 ) -> Result<Json<GameStateResponse>, StatusCode> {
     // Play the input move
     let game_state = {
-    let mut game = app.games.get_mut(&game_id).ok_or(StatusCode::NOT_FOUND)?;
+        let mut game = app.games.get_mut(&game_id).ok_or(StatusCode::NOT_FOUND)?;
 
         game.game_state
             .play_move(next_move)
-        .map_err(|_| StatusCode::CONFLICT)?;
+            .map_err(|_| StatusCode::CONFLICT)?;
 
         game.game_state.clone()
     };
 
-    let best_move = game_state
-        .board
-        .play_random_legal_stone(Color::White, &mut rand::rng())
-        .map(|(pos, _board)| Move::Stone(pos))
-        .unwrap_or(Move::Pass);
+    // Run the solver in background task
+    let best_move = spawn_blocking(|| {
+        // TODO: Don't clone, keep solver in state, reuse tree on move.
+        let mut solver = Solver::new(game_state);
+
+        for _i in 0..10000 {
+            solver.one_step();
+        }
+
+        solver.best_move()
+    })
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+    .ok_or(StatusCode::INTERNAL_SERVER_ERROR)?;
 
     // Play the response move
     let mut game = app.games.get_mut(&game_id).ok_or(StatusCode::NOT_FOUND)?;

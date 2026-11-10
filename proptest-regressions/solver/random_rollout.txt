@@ -1,0 +1,8 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc ad1727012e48f2c4b5e878f5b7465d4bb2ed94e6d1e3490321970ad66c8b2a9a # shrinks to ReferenceArgs = ReferenceArgs { board: Board { stones: {Black: Bitboard16 { bits: (0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0) }, White: Bitboard16 { bits: (0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0) }}, hash: ZobristHash(0) }, color: Black }
+cc 481471a8e180fc3021bc0ba8e9febce4ca371d6c20d8424a2dc64858659c4dbf # shrinks to ReferenceArgs = ReferenceArgs { board: Board { stones: {Black: Bitboard16 { bits: (0, 0, 0, 8126, 7417, 3069, 7867, 4079, 6391, 895, 2943, 7391, 7927, 0, 0, 0) }, White: Bitboard16 { bits: (0, 0, 0, 0, 0, 0, 0, 0, 1536, 1024, 1024, 0, 0, 0, 0, 0) }}, hash: ZobristHash(13964031578111360249) }, color: White }

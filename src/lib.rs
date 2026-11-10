@@ -3,6 +3,7 @@ mod board;
 mod color;
 mod game_state;
 mod geometry;
+pub mod solver;
 mod util;
 mod zobrist;
 
